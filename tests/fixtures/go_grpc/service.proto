@@ -1,0 +1,18 @@
+syntax = "proto3";
+package recon;
+option go_package = "./proto";
+
+service DataService {
+    rpc GetData (DataRequest) returns (DataResponse);
+    rpc SetData (DataRequest) returns (DataResponse);
+}
+
+message DataRequest {
+    string key = 1;
+    string value = 2;
+}
+
+message DataResponse {
+    bool ok = 1;
+    string result = 2;
+}

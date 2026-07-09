@@ -1,0 +1,86 @@
+# CTF A/D Recon Suite — bash aliases/functions
+# Append to ~/.bashrc with: cat aliases.txt >> ~/.bashrc && source ~/.bashrc
+# (Non viene fatto silenziosamente dal Dockerfile: è una scelta consapevole dell'utente)
+
+# ── Avvio rapido ────────────────────────────────────────────────────────────
+
+# Analizza un servizio (non-interattivo, Docker)
+recon() {
+    python3 "$(dirname "${BASH_SOURCE[0]}")/start.py" --path="$1" "${@:2}"
+}
+
+# Stessa cosa con Podman
+reconp() {
+    python3 "$(dirname "${BASH_SOURCE[0]}")/start.py" --path="$1" --engine=podman "${@:2}"
+}
+
+# Lancia un singolo modulo su un servizio già analizzato
+recon-module() {
+    # recon-module /path/to/service sqlmap
+    python3 "$(dirname "${BASH_SOURCE[0]}")/start.py" --path="$1" --module="$2" "${@:3}"
+}
+
+# Sincronizza il report da un collega via VPN
+recon-sync() {
+    # recon-sync /path/to/service git@10.0.0.2:reports/service
+    python3 "$(dirname "${BASH_SOURCE[0]}")/start.py" --path="$1" --clone="$2"
+}
+
+# ── Monitoraggio report ─────────────────────────────────────────────────────
+
+# Segui il report Markdown mentre viene generato
+recon-tail() {
+    local svc="${1:-$(ls reports/ | head -1)}"
+    tail -f "reports/$svc/report.md"
+}
+
+# Apri il report nel pager
+recon-view() {
+    local svc="${1:-$(ls reports/ | head -1)}"
+    less "reports/$svc/report.md"
+}
+
+# Lista i finding ad alta confidence da tutti i moduli
+recon-highs() {
+    local svc="${1:-$(ls reports/ | head -1)}"
+    python3 -c "
+import json, glob, sys
+svc = sys.argv[1]
+for f in glob.glob(f'reports/{svc}/*.json'):
+    try:
+        d = json.load(open(f))
+    except:
+        continue
+    for fi in d.get('findings', []):
+        if fi.get('confidence') == 'high':
+            print(f\"[{d['module']}] {fi.get('file','?')}:{fi.get('line','?')} — {fi.get('detail','')[:100]}\")
+" "$svc"
+}
+
+# ── Gestione container ──────────────────────────────────────────────────────
+
+# Lista i container recon attivi
+recon-ps() {
+    docker ps --filter "name=ctf-recon-" 2>/dev/null || podman ps --filter "name=ctf-recon-" 2>/dev/null
+}
+
+# Ferma tutti i container recon
+recon-stop-all() {
+    docker ps -q --filter "name=ctf-recon-" | xargs -r docker stop
+    podman ps -q --filter "name=ctf-recon-" | xargs -r podman stop
+}
+
+# ── Reset ───────────────────────────────────────────────────────────────────
+
+# Rimuovi i report di un servizio (irreversibile!)
+recon-reset() {
+    local svc="$1"
+    if [ -z "$svc" ]; then echo "Usage: recon-reset <service>"; return 1; fi
+    read -p "Delete reports/$svc ? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then rm -rf "reports/$svc"; echo "Deleted."; fi
+}
+
+# Rebuilda l'immagine Docker
+recon-rebuild() {
+    docker build -t ctf-recon-suite:latest . 2>/dev/null || podman build -t ctf-recon-suite:latest .
+}

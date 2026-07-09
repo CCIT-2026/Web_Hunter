@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ctf-recon-suite/schemas/module_report.schema.json",
+  "title": "module_report",
+  "description": "Schema comune minimo per ogni reports/<service>/<modulo>.json. Ogni runner scrive in questo formato; reporting/markdown_report.py aggrega leggendo questi file. Estendere solo aggiungendo campi in 'findings[].' o metadati opzionali, mai cambiando i campi obbligatori.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["module", "service", "timestamp", "status", "skip_reason", "findings"],
+  "properties": {
+    "module": {
+      "type": "string",
+      "description": "Nome del modulo/runner che ha scritto il report (coincide con la chiave in TRIGGERS quando gated).",
+      "examples": ["mapping", "sqlmap", "jwt_tool", "ssrf_generic"]
+    },
+    "service": {
+      "type": "string",
+      "description": "Nome del servizio analizzato (derivato dal path, deterministico)."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC di completamento del modulo."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "skipped", "error"]
+    },
+    "skip_reason": {
+      "type": ["string", "null"],
+      "description": "Obbligatorio (non null) quando status='skipped' o 'error'. E' la motivazione tracciata per audit (es. 'skip: verifica JWT robusta, vedi app/middleware/auth.py:17', oppure 'nessun endpoint GraphQL nel mapping'). null quando status='completed'."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Vuoto se status!='completed' o se nessun finding. Ogni finding punta a file:riga esatti nel sorgente per verifica manuale.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["type", "file", "line", "confidence", "detail", "source_module"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Categoria interna del finding, coerente con le chiavi di trigger_rules.py.",
+            "examples": ["sqli", "nosqli", "ssti", "command_injection", "jwt", "ssrf", "graphql_injection", "path_traversal", "xpath_injection", "ldap_injection", "xxe", "secret", "deserialization", "file_upload"]
+          },
+          "file": {
+            "type": ["string", "null"],
+            "description": "Sorgente del sink, relativo alla root del servizio. null solo se il finding non e' localizzabile nel sorgente."
+          },
+          "line": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "endpoint": {
+            "type": ["string", "null"],
+            "description": "Path dell'endpoint bersaglio, quando applicabile."
+          },
+          "method": {
+            "type": ["string", "null"],
+            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "ANY", null]
+          },
+          "param": {
+            "type": ["string", "null"],
+            "description": "Parametro/campo bersaglio, quando noto."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "detail": {
+            "type": "string",
+            "description": "Descrizione leggibile del finding."
+          },
+          "source_module": {
+            "type": "string",
+            "description": "Modulo che ha originato il finding (di norma == module; puo' differire se il finding nasce dalla payload library invocata da un altro runner)."
+          },
+          "payload": {
+            "type": ["string", "null"],
+            "description": "Payload usato, quando il finding deriva da un tentativo della payload library."
+          },
+          "payload_category": {
+            "type": ["string", "null"],
+            "description": "Categoria PayloadsAllTheThings del payload usato."
+          },
+          "requires_manual_review": {
+            "type": "boolean",
+            "default": false,
+            "description": "True per vulnerabilita' logiche segnalate ma non verificabili automaticamente: confluiscono nella sezione 'Findings non verificabili automaticamente' del report."
+          },
+          "unlikely_path": {
+            "type": "boolean",
+            "default": false,
+            "description": "True per findings (es. credenziali da jsluice) il cui endpoint non risulta in endpoints_map.json: vanno nella sezione separata 'Path improbabili', non nel corpo principale."
+          }
+        }
+      }
+    }
+  }
+}

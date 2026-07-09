@@ -1,0 +1,187 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ctf-recon-suite/schemas/detected_stack.schema.json",
+  "title": "detected_stack",
+  "description": "Contratto prodotto da orchestrator/stack_detector.py (a partire dagli artefatti di mapping). E' l'UNICA fonte di verita' per l'attivazione condizionale dei moduli (trigger_rules.py) e per il gating della payload library. Nessun altro modulo reimplementa la detection dello stack: la legge da qui.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "language",
+    "framework",
+    "has_php",
+    "has_symfony_twig",
+    "has_grpc",
+    "grpc_proto_files",
+    "has_file_upload",
+    "file_upload_locations",
+    "has_sql_queries",
+    "sql_query_locations",
+    "has_nosql",
+    "nosql_locations",
+    "uses_jwt",
+    "jwt_verification_locations",
+    "has_eval_on_input",
+    "eval_locations",
+    "db_present_in_domain",
+    "has_outbound_request_on_input",
+    "ssrf_locations",
+    "has_graphql_endpoint",
+    "graphql_locations",
+    "has_xpath_parser",
+    "xpath_locations",
+    "has_file_path_from_input",
+    "path_traversal_locations",
+    "has_ldap_query",
+    "ldap_locations"
+  ],
+  "definitions": {
+    "codeLocation": {
+      "type": "object",
+      "description": "Puntamento file:riga, mai stringa libera: deve restare parsabile dagli altri moduli (es. payload_library/selector.py lo usa per decidere su quale endpoint/parametro tentare un payload).",
+      "required": ["file", "line"],
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Path del sorgente relativo alla root del servizio analizzato (senza .git)."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Riga esatta della funzione/istruzione sospetta."
+        },
+        "endpoint": {
+          "type": ["string", "null"],
+          "description": "Path dell'endpoint associato quando ricavabile dal mapping, altrimenti null."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "properties": {
+    "language": {
+      "type": "string",
+      "description": "Linguaggio principale rilevato.",
+      "examples": ["python", "javascript", "php", "go", "ruby", "java", "unknown"]
+    },
+    "framework": {
+      "type": ["string", "null"],
+      "description": "Framework web rilevato (flask, django, express, symfony, laravel, gin, ...), null se non identificabile."
+    },
+
+    "has_php": { "type": "boolean" },
+    "has_symfony_twig": { "type": "boolean" },
+
+    "has_grpc": { "type": "boolean" },
+    "grpc_proto_files": {
+      "type": "array",
+      "description": "Path dei file .proto trovati (relativi alla root del servizio).",
+      "items": { "type": "string" }
+    },
+
+    "has_file_upload": { "type": "boolean" },
+    "file_upload_locations": {
+      "type": "array",
+      "items": {
+        "allOf": [{ "$ref": "#/definitions/codeLocation" }],
+        "properties": {
+          "accepts_executable": {
+            "type": "boolean",
+            "description": "True se il sink accetta/salva file potenzialmente eseguibili: usato per gating di exiftool (upload + file eseguibili)."
+          }
+        }
+      }
+    },
+
+    "has_sql_queries": { "type": "boolean" },
+    "sql_query_locations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/codeLocation" }
+    },
+
+    "has_nosql": { "type": "boolean" },
+    "nosql_locations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/codeLocation" }
+    },
+
+    "uses_jwt": { "type": "boolean" },
+    "jwt_verification_locations": {
+      "type": "array",
+      "description": "Un elemento per punto di verifica firma JWT. looks_weak e' il campo che decide se jwt_tool fa test attivi o skippa.",
+      "items": {
+        "allOf": [{ "$ref": "#/definitions/codeLocation" }],
+        "required": ["looks_weak"],
+        "properties": {
+          "looks_weak": {
+            "type": "boolean",
+            "description": "True se la verifica firma appare debole (alg none, secret hardcoded, verify=False)."
+          },
+          "weak_reason": {
+            "type": ["string", "null"],
+            "description": "Motivo della debolezza (es. 'alg none accepted', 'verify=False'), null se looks_weak e' false.",
+            "enum": ["alg_none", "hardcoded_secret", "verify_disabled", "weak_secret", null]
+          }
+        }
+      }
+    },
+
+    "has_eval_on_input": {
+      "type": "boolean",
+      "description": "Python: eval/exec/pickle.loads/yaml.load su input arbitrario. Gating di fickling."
+    },
+    "eval_locations": {
+      "type": "array",
+      "items": {
+        "allOf": [{ "$ref": "#/definitions/codeLocation" }],
+        "properties": {
+          "sink": {
+            "type": "string",
+            "description": "Funzione sink coinvolta.",
+            "examples": ["eval", "exec", "pickle.loads", "yaml.load"]
+          }
+        }
+      }
+    },
+
+    "db_present_in_domain": {
+      "type": "boolean",
+      "description": "True se nel dominio del servizio e' presente un DB/credenziali di connessione. Gating di trufflehog e gitleaks."
+    },
+
+    "has_outbound_request_on_input": {
+      "type": "boolean",
+      "description": "SSRF: una richiesta uscente e' costruita da input utente (es. requests.get(url_da_input))."
+    },
+    "ssrf_locations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/codeLocation" }
+    },
+
+    "has_graphql_endpoint": { "type": "boolean" },
+    "graphql_locations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/codeLocation" }
+    },
+
+    "has_xpath_parser": { "type": "boolean" },
+    "xpath_locations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/codeLocation" }
+    },
+
+    "has_file_path_from_input": {
+      "type": "boolean",
+      "description": "Directory traversal: un path su filesystem e' costruito da input utente."
+    },
+    "path_traversal_locations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/codeLocation" }
+    },
+
+    "has_ldap_query": { "type": "boolean" },
+    "ldap_locations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/codeLocation" }
+    }
+  }
+}

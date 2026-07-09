@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ctf-recon-suite/schemas/endpoints_map.schema.json",
+  "title": "endpoints_map",
+  "description": "Prodotto da modules/mapping/endpoint_parser.py. Elenca ogni endpoint HTTP del servizio con la sua implementazione file:riga. Ogni modulo di injection lo legge per sapere DOVE colpire, senza rifare discovery propria.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["path", "method", "file", "line", "handler_function", "params", "auth"],
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path dell'endpoint cosi' come dichiarato nel routing.",
+        "examples": ["/api/login"]
+      },
+      "method": {
+        "type": "string",
+        "description": "Metodo HTTP. Un endpoint compare piu' volte (una entry per combinazione path+method) se ha handler diversi per metodo.",
+        "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "ANY"]
+      },
+      "file": {
+        "type": "string",
+        "description": "Sorgente che implementa l'handler, relativo alla root del servizio."
+      },
+      "line": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Riga di implementazione dell'handler."
+      },
+      "handler_function": {
+        "type": ["string", "null"],
+        "description": "Nome della funzione/metodo handler, null se anonimo/non ricavabile."
+      },
+      "params": {
+        "type": "array",
+        "description": "Parametri ricavabili staticamente dal codice. Array vuoto se non ricavabili: NON inventare parametri.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "location"],
+          "properties": {
+            "name": { "type": "string" },
+            "location": {
+              "type": "string",
+              "enum": ["query", "body", "path", "header", "cookie"]
+            },
+            "type": {
+              "type": ["string", "null"],
+              "description": "Tipo dichiarato/inferito, null se sconosciuto.",
+              "examples": ["string", "integer", "boolean", "file", "object"]
+            }
+          }
+        }
+      },
+      "auth": {
+        "description": "null se l'endpoint non ha protezione rilevata.",
+        "oneOf": [
+          { "type": "null" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["required", "type", "file", "line"],
+            "properties": {
+              "required": { "type": "boolean" },
+              "type": {
+                "type": "string",
+                "description": "Meccanismo di auth rilevato dal middleware/decoratore.",
+                "examples": ["jwt", "session", "basic", "apikey", "custom"]
+              },
+              "file": { "type": "string" },
+              "line": { "type": "integer", "minimum": 1 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
