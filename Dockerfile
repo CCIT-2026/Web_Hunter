@@ -98,8 +98,9 @@ RUN pip3 install --no-cache-dir --break-system-packages nosqli 2>/dev/null || tr
 RUN mkdir -p /home/wordlists && \
     git clone --depth 1 https://github.com/danielmiessler/SecLists.git /home/wordlists/SecLists
 
-# ── PayloadsAllTheThings (copiato in /assets) ─────────────────────────────────
+# ── Assets (payload library + logo) ──────────────────────────────────────────
 COPY assets/payloads_all_the_things.json /assets/payloads_all_the_things.json
+COPY assets/.logo/ascii_art.txt          /assets/.logo/ascii_art.txt
 
 # ── Suite source ──────────────────────────────────────────────────────────────
 COPY orchestrator/     /app/orchestrator/

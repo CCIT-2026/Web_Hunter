@@ -18,6 +18,20 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# /assets/.logo/ascii_art.txt è il path fisso nel container (copiato dal Dockerfile).
+# Il fallback risale da __file__ per supportare esecuzioni fuori container (dev locale).
+def _load_logo() -> str:
+    candidates = [Path("/assets/.logo/ascii_art.txt")]
+    here = Path(__file__).resolve().parent
+    for p in [here, here.parent, here.parent.parent]:
+        candidates.append(p / "assets" / ".logo" / "ascii_art.txt")
+    for path in candidates:
+        if path.exists():
+            return path.read_text().rstrip()
+    return ""
+
+_LOGO = _load_logo()
+
 # mapping è escluso dal loop: viene renderizzato direttamente da endpoints_map.json
 _SECTION_ORDER = [
     ("stack_detector",   None),
@@ -118,6 +132,8 @@ def generate(service_name: str, report_dir: str) -> Path:
     # ── Header ──────────────────────────────────────────────────────────────
     lang = stack.get("language", "unknown")
     fw = stack.get("framework") or "unknown"
+    if _LOGO:
+        lines += [f"```\n{_LOGO}\n```", ""]
     lines += [
         f"# {service_name}",
         "",
@@ -170,59 +186,19 @@ def generate(service_name: str, report_dir: str) -> Path:
             lines += [f"> **Errore:** {report.get('skip_reason', 'unknown error')}", ""]
             continue
 
-        if not main_findings:
-            if manual:
-                # tutti i findings sono andati in verifica manuale
-                lines += [f"> {len(manual)} finding(s) — vedi §Findings non verificabili automaticamente.", ""]
-            else:
-                lines += ["Nessun finding.", ""]
-            continue
-
-        for f in main_findings:
-            lines.append(_format_finding_inline(f))
-        lines.append("")
+        _render_findings_grouped(main_findings + manual, lines, show_source=False)
 
     # ── Unlikely paths ───────────────────────────────────────────────────────
     if all_unlikely:
         lines += ["## Path improbabili", ""]
         lines += ["> Riferimenti JS/TS che non corrispondono ad alcun endpoint nel mapping.", ""]
-        for f in all_unlikely:
-            lines.append(_format_finding_inline(f))
-        lines.append("")
+        _render_findings_grouped(all_unlikely, lines, show_source=False)
 
-    # ── Manual review — raggruppato per priorità → tipo ──────────────────────
+    # ── Manual review — riepilogo cross-modulo per priorità → tipo ───────────
     if all_manual:
         lines += ["## Findings non verificabili automaticamente", ""]
-        lines += ["> Richiedono verifica manuale: vulnerabilità logiche, confidence bassa, o pattern statici.", ""]
-
-        # group: priority → type_label → [findings]
-        groups: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
-        for f in all_manual:
-            priority = f.get("confidence", "unknown").upper()
-            label = _type_label(f.get("type", ""))
-            groups[priority][label].append(f)
-
-        for priority in _PRIORITY_ORDER:
-            if priority not in groups:
-                continue
-            lines += [f"### {priority}", ""]
-            for type_label in sorted(groups[priority]):
-                findings_in_group = groups[priority][type_label]
-                lines += [f"#### {type_label}", ""]
-                for f in findings_in_group:
-                    lines.append(_format_finding_manual(f))
-                lines.append("")
-
-        # priorità non in _PRIORITY_ORDER (es. "UNKNOWN")
-        for priority, type_groups in groups.items():
-            if priority in _PRIORITY_ORDER:
-                continue
-            lines += [f"### {priority}", ""]
-            for type_label in sorted(type_groups):
-                lines += [f"#### {type_label}", ""]
-                for f in type_groups[type_label]:
-                    lines.append(_format_finding_manual(f))
-                lines.append("")
+        lines += ["> Riepilogo cross-modulo — gli stessi findings sono visibili nelle rispettive sezioni sopra.", ""]
+        _render_findings_grouped(all_manual, lines, show_source=True)
 
     content = "\n".join(lines)
     out.write_text(content)
@@ -230,30 +206,42 @@ def generate(service_name: str, report_dir: str) -> Path:
     return out
 
 
-def _format_finding_inline(f: dict) -> str:
-    """Formato compatto per le sezioni per-modulo e path improbabili."""
-    conf = f"[{f.get('confidence', '?').upper()}]"
-    loc  = f"**{f['file']}:{f['line']}**" if f.get("file") else ""
-    ep   = f"`{f['endpoint']} {f.get('method', '')}`.strip()" if f.get("endpoint") else ""
-    detail = f.get("detail", "")
-    parts = [x for x in [conf, loc, ep, detail] if x]
-    return "- " + "  ".join(parts)
+def _render_findings_grouped(findings: list[dict], lines: list[str], *, show_source: bool) -> None:
+    """Renderizza findings raggruppati per priorità → tipo.
 
-
-def _format_finding_manual(f: dict) -> str:
-    """Formato espanso per la sezione di verifica manuale.
-
-    Omette priorità e tipo (già nei titoli di sezione); mostra file:riga,
-    endpoint se presente, e il testo completo del detail su riga separata.
+    Usato sia nelle sezioni per-modulo (show_source=False, il modulo è ovvio dal titolo)
+    sia nel riepilogo cross-modulo finale (show_source=True).
     """
+    if not findings:
+        lines += ["Nessun finding.", ""]
+        return
+
+    groups: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
+    for f in findings:
+        priority = f.get("confidence", "unknown").upper()
+        groups[priority][_type_label(f.get("type", ""))].append(f)
+
+    ordered = [p for p in _PRIORITY_ORDER if p in groups]
+    ordered += [p for p in groups if p not in _PRIORITY_ORDER]
+
+    for priority in ordered:
+        lines += [f"### {priority}", ""]
+        for label in sorted(groups[priority]):
+            lines += [f"#### {label}", ""]
+            for f in groups[priority][label]:
+                lines.append(_format_finding(f, show_source=show_source))
+            lines.append("")
+
+
+def _format_finding(f: dict, *, show_source: bool) -> str:
+    """Riga singola di finding: file:riga, endpoint opzionale, source opzionale, detail."""
     loc    = f"`{f['file']}:{f['line']}`" if f.get("file") else "?"
-    ep     = f" — endpoint `{f['endpoint']}`" if f.get("endpoint") else ""
-    source = f" *(via {f['source_module']})*" if f.get("source_module") else ""
+    method = f" {f['method']}" if f.get("method") else ""
+    ep     = f" — `{f['endpoint']}{method}`" if f.get("endpoint") else ""
+    source = f" *(via {f['source_module']})*" if show_source and f.get("source_module") else ""
     detail = f.get("detail", "")
     header = f"- {loc}{ep}{source}"
-    if detail:
-        return header + f"\n  > {detail}"
-    return header
+    return header + f"\n  > {detail}" if detail else header
 
 
 def _load_json(path: Path):
