@@ -205,6 +205,70 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
   ```
   *Analisi*: Nodejsscan si è avviato correttamente, scansionando i sorgenti `.mjs` e `.js` del servizio e uscendo con successo senza falsi positivi o errori di parser.
 
+#### Test del modulo: `slipit`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/Skypedia --module=slipit --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  14:20:58  INFO      orchestrator.core  === Single module mode: slipit ===
+  14:20:58  INFO      modules.base_runner  slipit: completed in 0.2s (0 findings)
+  ```
+  *Analisi*: Il modulo è stato eseguito correttamente eseguendo le routine di testing attive per bypass di estensione senza saltare (skip_reason: null).
+
+#### Test del modulo: `polyglot`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/Skypedia --module=polyglot --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  14:22:54  INFO      orchestrator.core  === Single module mode: polyglot ===
+  14:22:54  INFO      modules.base_runner  polyglot: completed in 0.1s (0 findings)
+  ```
+  *Analisi*: Il modulo ha generato in-process i file polimorfici (immagini/PDF con tail PHP/HTML) e ha tentato l'upload sfruttando i 13 endpoint mappati staticamente su Skypedia.
+
+---
+
+# DummyService — Test Moduli Ad-Hoc
+> **Target servizio**: `/home/mimmo/Desktop/Web_Hunter/DummyService` (Servizio Flask mockato per sbloccare i moduli gated)  
+> **Data**: 2026-07-10  
+
+## Stack Rilevato
+- `language`: `python`
+- `framework`: `flask`
+- `has_file_upload`: `true` (accepts_executable: `true`)
+- `has_nosql`: `true`
+- `has_eval_on_input`: `true`
+
+## Esiti Moduli Testati
+
+#### Test del modulo: `fickling`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=fickling --no-target --verbose --dev
+  ```
+- **Output**:
+  ```text
+  14:26:01  INFO      orchestrator.core  === Single module mode: fickling ===
+  14:26:01  INFO      modules.base_runner  fickling: completed in 0.0s (1 findings)
+  ```
+  *Findings rilevanti*:
+  - **Deserialization (High Confidence)**: Python sink='pickle.loads' on user input rilevato a `app.py:18`. Valida l'analisi di fickling sui sink deserializzativi.
+
+#### Test del modulo: `nosqli`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=nosqli --no-target --verbose --dev
+  ```
+- **Output**:
+  ```text
+  14:27:11  INFO      orchestrator.core  === Single module mode: nosqli ===
+  14:27:11  INFO      modules.base_runner  nosqli: completed in 0.0s (0 findings)
+  ```
+  *Analisi*: Valida la logica di fallback manuale (curl + payload library) in assenza di binari nosqli in PATH.
+
 ---
 
 ## 🐛 Bug Trovati e Risolti
