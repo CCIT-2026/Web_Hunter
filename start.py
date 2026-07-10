@@ -18,6 +18,9 @@ Usage:
   ./start.py --path=/srv/targets/webapp --clean        # prune + rimuovi container e immagine
   ./start.py --rebuild                                 # clean + rebuild da zero, poi avvia (chiede il path se manca --path)
   ./start.py --path=/srv/targets/webapp --rebuild      # clean + rebuild + avvia sul servizio dato
+  ./start.py --path=/srv/targets/webapp --verbose      # mostra stdout/stderr di tutti i tool
+  ./start.py --path=/srv/targets/webapp --debug        # mostra stato variabili, senza stdout tool
+  ./start.py --path=/srv/targets/webapp --debug --verbose  # stato variabili + stdout tool
 """
 
 import argparse
@@ -52,13 +55,108 @@ _IMAGE_NAME = "ctf-recon-suite:latest"
 
 
 # ---------------------------------------------------------------------------
+# Output — colored step messages always shown; tool output gated by flags
+#
+# Comportamento flag:
+#   (nessuno)         → solo messaggi colorati, stdout tool soppressi
+#   --verbose         → messaggi colorati + stdout/stderr di tutti i tool
+#   --debug           → messaggi colorati + dump variabili compatto, NO stdout tool
+#   --debug --verbose → messaggi colorati + dump variabili + stdout tool
+# ---------------------------------------------------------------------------
+
+# Pre-parse flags: argparse non è ancora disponibile, ma ci servono subito
+_verbose = "--verbose" in sys.argv
+_debug   = "--debug"   in sys.argv
+
+
+class _C:
+    """ANSI codes — disabilitati se stdout non è un TTY (pipe, CI, redirect)."""
+    _tty    = sys.stdout.isatty()
+    RESET   = "\033[0m"  if _tty else ""
+    BOLD    = "\033[1m"  if _tty else ""
+    DIM     = "\033[2m"  if _tty else ""
+    CYAN    = "\033[36m" if _tty else ""
+    GREEN   = "\033[32m" if _tty else ""
+    YELLOW  = "\033[33m" if _tty else ""
+    RED     = "\033[31m" if _tty else ""
+    MAGENTA = "\033[35m" if _tty else ""
+
+
+def step(msg: str) -> None:
+    """Passo in corso — sempre visibile."""
+    print(f"{_C.CYAN}{_C.BOLD}→{_C.RESET}  {msg}")
+
+def ok(msg: str) -> None:
+    """Operazione completata — sempre visibile."""
+    print(f"{_C.GREEN}{_C.BOLD}✓{_C.RESET}  {msg}")
+
+def warn(msg: str) -> None:
+    """Avviso non bloccante — sempre visibile."""
+    print(f"{_C.YELLOW}{_C.BOLD}⚠{_C.RESET}  {msg}")
+
+def err(msg: str) -> None:
+    """Errore — sempre visibile, su stderr."""
+    print(f"{_C.RED}{_C.BOLD}✗{_C.RESET}  {msg}", file=sys.stderr)
+
+def dbg(**kwargs) -> None:
+    """Dump compatto variabili — solo con --debug."""
+    if not _debug:
+        return
+    parts = "  ".join(
+        f"{_C.MAGENTA}{k}{_C.RESET}={_C.DIM}{repr(v)}{_C.RESET}"
+        for k, v in kwargs.items()
+    )
+    print(f"{_C.DIM}[dbg]{_C.RESET} {parts}")
+
+
+def run_cmd(cmd: list, *, cwd: str | None = None, shell: bool = False, capture: bool = False):
+    """
+    Esegue un sottoprocesso rispettando --verbose / --debug.
+
+    capture=False (default)
+        Sopprime stdout/stderr per default.
+        Con --verbose li lascia fluire sul terminale.
+    capture=True
+        Cattura sempre stdout/stderr per uso logico (returncode, parsing).
+        Con --verbose li stampa anche sul terminale dopo la cattura.
+
+    Con --debug logga il comando lanciato — mai l'output del tool.
+    Ritorna sempre CompletedProcess (returncode sempre disponibile).
+    """
+    if _debug:
+        label = cmd if shell else " ".join(str(c) for c in cmd)
+        print(f"{_C.DIM}[dbg]{_C.RESET} {_C.MAGENTA}$>{_C.RESET} {label}")
+
+    if capture:
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, shell=shell)
+        if _verbose:
+            if r.stdout.strip():
+                sys.stdout.write(r.stdout)
+            if r.stderr.strip():
+                sys.stderr.write(r.stderr)
+        return r
+    else:
+        if _verbose:
+            return subprocess.run(cmd, cwd=cwd, shell=shell)
+        return subprocess.run(cmd, capture_output=True, cwd=cwd, shell=shell)
+
+
+def run_interactive(cmd, *, cwd: str | None = None, shell: bool = False):
+    """Comandi approvati dall'utente: output sempre visibile indipendentemente dai flag."""
+    if _debug:
+        label = cmd if shell else " ".join(str(c) for c in cmd)
+        print(f"{_C.DIM}[dbg]{_C.RESET} {_C.MAGENTA}$>{_C.RESET} {label}")
+    return subprocess.run(cmd, cwd=cwd, shell=shell)
+
+
+# ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 
 def load_settings() -> dict:
     if not _SETTINGS_PATH.exists():
         _SETTINGS_PATH.write_text(json.dumps(_DEFAULT_SETTINGS, indent=2))
-        print(f"[init] Created {_SETTINGS_PATH} with defaults")
+        ok(f"Creato {_SETTINGS_PATH} con valori di default")
     with open(_SETTINGS_PATH) as f:
         saved = json.load(f)
     return {**_DEFAULT_SETTINGS, **saved}
@@ -92,46 +190,48 @@ def _clean(engine: str):
       - Qualsiasi altro container, immagine o volume sul sistema.
       - 'system prune' e '--volumes' sono intenzionalmente assenti.
     """
-    # 1. Ferma e rimuove tutti i container ctf-recon-* (filter per nome, non globale)
-    result = subprocess.run(
-        [engine, "ps", "-aq", "--filter", "name=ctf-recon-"],
-        capture_output=True, text=True,
-    )
-    ids = [i for i in result.stdout.strip().splitlines() if i]
+    step("Pulizia container e immagine recon...")
+    dbg(engine=engine, image=_IMAGE_NAME)
+
+    r = run_cmd([engine, "ps", "-aq", "--filter", "name=ctf-recon-"], capture=True)
+    ids = [i for i in r.stdout.strip().splitlines() if i]
     if ids:
-        print(f"[clean] Removing {len(ids)} recon container(s)…")
-        subprocess.run([engine, "rm", "-f"] + ids)
+        step(f"Rimozione {len(ids)} container recon...")
+        run_cmd([engine, "rm", "-f"] + ids)
+        ok(f"{len(ids)} container rimossi.")
     else:
-        print("[clean] No recon containers found.")
+        ok("Nessun container recon attivo.")
 
-    # 2. Rimuove solo l'immagine ctf-recon-suite:latest
-    r = subprocess.run([engine, "rmi", "-f", _IMAGE_NAME], capture_output=True, text=True)
+    r = run_cmd([engine, "rmi", "-f", _IMAGE_NAME], capture=True)
     if r.returncode == 0:
-        print(f"[clean] Image {_IMAGE_NAME} removed.")
+        ok(f"Immagine {_IMAGE_NAME} rimossa.")
     else:
-        print(f"[clean] Image {_IMAGE_NAME} not found or already removed.")
+        warn(f"Immagine {_IMAGE_NAME} non trovata o già rimossa.")
 
-    # 3. Pruning limitato: solo layer dangling (untagged) rimasti dai nostri build.
-    #    'image prune -f' rimuove SOLO immagini senza tag — non tocca nient'altro.
-    #    NON usiamo 'system prune' né '--volumes': quello sarebbe globale e distruttivo.
-    print("[clean] Pruning dangling build layers (untagged images only)…")
-    subprocess.run([engine, "image", "prune", "-f"])
-    print("[clean] Done.")
+    step("Pruning layer dangling (untagged)...")
+    run_cmd([engine, "image", "prune", "-f"])
+    ok("Clean completato.")
 
 
 def _build_image(engine: str, no_cache: bool = False):
     dockerfile = _HERE / "Dockerfile"
     if not dockerfile.exists():
-        print(f"[error] Dockerfile not found at {dockerfile}", file=sys.stderr)
+        err(f"Dockerfile non trovato: {dockerfile}")
         sys.exit(1)
     cmd = [engine, "build", "-t", _IMAGE_NAME, str(_HERE)]
     if no_cache:
         cmd.insert(2, "--no-cache")
-    print(f"[build] {' '.join(cmd)}")
-    r = subprocess.run(cmd)
+
+    dbg(dockerfile=str(dockerfile), no_cache=no_cache, image=_IMAGE_NAME)
+    step(f"Build immagine {_IMAGE_NAME}{'  (--no-cache)' if no_cache else ''}...")
+
+    r = run_cmd(cmd)
     if r.returncode != 0:
-        print("[error] Image build failed", file=sys.stderr)
+        err("Build immagine fallita.")
+        if not _verbose:
+            warn("Riavvia con --verbose per i dettagli del build.")
         sys.exit(1)
+    ok("Immagine costruita.")
 
 
 def _run_analysis(
@@ -176,22 +276,30 @@ def _run_analysis(
         cmd += ["-e", "DEBUG=1"]
 
     cmd += [_IMAGE_NAME]
-    print(f"[run] {' '.join(cmd)}")
-    subprocess.run(cmd)
+
+    dbg(
+        container=container,
+        service_name=service_name,
+        module=module or "(tutti)",
+        target_url=settings.get("target_url") or "(non impostato)",
+        dev=dev,
+    )
+    step(f"Avvio analisi  {service_name}{'  [' + module + ']' if module else ''}...")
+
+    run_cmd(cmd)
 
 
 def _clone_reports(engine: str, clone_url: str, report_dir: str, service_name: str):
     """Clone a colleague's report repo instead of starting fresh."""
     from modules.sync import git_sync
-    print(f"[sync] Cloning {clone_url} → {report_dir}")
-    ok = git_sync.clone(clone_url, report_dir)
-    if not ok:
-        print("[error] Clone failed — check URL and VPN connectivity", file=sys.stderr)
+    step(f"Clone report da  {clone_url}")
+    clone_ok = git_sync.clone(clone_url, report_dir)
+    if not clone_ok:
+        err("Clone fallito — controlla URL e connettività VPN.")
         sys.exit(1)
-    print(f"[sync] Clone OK. Reports available in {report_dir}")
-    # Pull latest if already cloned
-    ok2, msg = git_sync.pull(report_dir)
-    print(f"[sync] Pull: {msg}")
+    ok(f"Clone OK → {report_dir}")
+    _, msg = git_sync.pull(report_dir)
+    ok(f"Pull: {msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -283,16 +391,16 @@ def _replace_port_in_service(
 
 
 def _wait_for_service(url: str, timeout: int = 20) -> bool:
-    print(f"[target] Attendo {url}", end="", flush=True)
+    print(f"{_C.CYAN}{_C.BOLD}→{_C.RESET}  Attendo {url}", end="", flush=True)
     for _ in range(timeout):
         try:
             urllib.request.urlopen(url, timeout=1)
-            print(" OK")
+            print(f"  {_C.GREEN}OK{_C.RESET}")
             return True
         except Exception:
             print(".", end="", flush=True)
             time.sleep(1)
-    print(" timeout")
+    print(f"  {_C.YELLOW}timeout{_C.RESET}")
     return False
 
 
@@ -301,14 +409,15 @@ def _start_target_service(engine: str, service_path: str, settings: dict) -> "st
     root = Path(service_path)
     compose_file = _detect_compose_file(service_path)
 
-    # Mostra file di primo livello
+    step("File nel servizio:")
     entries = sorted(
         (e.name + ("/" if e.is_dir() else "") for e in root.iterdir() if not e.name.startswith(".")),
         key=lambda x: (not x.endswith("/"), x),
     )
-    print("\n[target] File nel servizio:")
     for e in entries:
-        print(f"  {e}")
+        print(f"    {e}")
+
+    dbg(compose_file=str(compose_file) if compose_file else None, service_path=service_path)
 
     if compose_file:
         # Loop: chiede conferma finché l'utente non dice sì
@@ -322,17 +431,17 @@ def _start_target_service(engine: str, service_path: str, settings: dict) -> "st
             while True:
                 cmd = _ask("Comando da runnare prima").strip()
                 if cmd:
-                    print(f"[target] $ {cmd}")
-                    subprocess.run(cmd, shell=True, cwd=service_path)
+                    step(f"$ {cmd}")
+                    run_interactive(cmd, shell=True, cwd=service_path)
                 if _ask("Altro da runnare? [s/n]", "n").lower() not in ("s", "si", "sì", "y", "yes"):
                     break
     else:
-        print("\n[target] Nessun docker-compose trovato.")
+        warn("Nessun docker-compose trovato.")
         while True:
             cmd = _ask("Comando per avviare il servizio").strip()
             if cmd:
-                print(f"[target] $ {cmd}")
-                subprocess.run(cmd, shell=True, cwd=service_path)
+                step(f"$ {cmd}")
+                run_interactive(cmd, shell=True, cwd=service_path)
             if _ask("Altro da runnare? [s/n]", "n").lower() not in ("s", "si", "sì", "y", "yes"):
                 break
 
@@ -344,34 +453,38 @@ def _start_target_service(engine: str, service_path: str, settings: dict) -> "st
         except ValueError:
             port = 5000
 
+    dbg(host=host, detected_port=port)
+
     # Gestione conflitto porta
     if _is_port_busy(host, port):
-        print(f"\n[target] La porta {port} è occupata su {host}.")
+        warn(f"Porta {port} occupata su {host}.")
         alt_host = "127.0.0.2"
         if not _is_port_busy(alt_host, port):
-            print(f"[target] Cambio interfaccia → {alt_host}:{port}")
+            step(f"Cambio interfaccia → {alt_host}:{port}")
             changed = _replace_port_in_service(service_path, host, port, alt_host, port)
             if changed:
-                print(f"[target] Aggiornati: {', '.join(changed)}")
+                ok(f"Aggiornati: {', '.join(changed)}")
             host = alt_host
         else:
             free = _find_free_ports(exclude=_BURP_RESERVED | {port})
-            print(f"[target] Porte libere: {', '.join(map(str, free))}")
+            step(f"Porte libere: {', '.join(map(str, free))}")
             try:
                 new_port = int(_ask("Quale porta usare?", str(free[0]) if free else "5001"))
             except ValueError:
                 new_port = free[0] if free else 5001
             changed = _replace_port_in_service(service_path, host, port, host, new_port)
             if changed:
-                print(f"[target] Aggiornati: {', '.join(changed)}")
+                ok(f"Aggiornati: {', '.join(changed)}")
             port = new_port
 
     # Avvia (solo se c'è compose; altrimenti l'utente lo ha già avviato coi pre-comandi)
     if compose_file:
-        print(f"\n[target] $ {engine} compose up -d")
-        r = subprocess.run([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
+        step(f"{engine} compose up -d")
+        r = run_cmd([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
         if r.returncode != 0:
-            print("[target] Avvio fallito.")
+            err("Avvio servizio fallito.")
+            if not _verbose:
+                warn("Riavvia con --verbose per i dettagli.")
             return None
 
     target_url = f"http://{host}:{port}"
@@ -380,7 +493,7 @@ def _start_target_service(engine: str, service_path: str, settings: dict) -> "st
     # Salva in settings.json
     settings["target_url"] = target_url
     _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
-    print(f"[target] target_url salvato → {target_url}")
+    ok(f"target_url → {target_url}")
     return target_url
 
 
@@ -393,10 +506,10 @@ def _ask(prompt: str, default: str = "") -> str:
     return val or default
 
 
-def interactive_mode(settings: dict) -> tuple[str, str | None, str | None]:
+def interactive_mode(settings: dict) -> tuple[str, str, str, str | None]:
     service_path = _ask("Service source path")
     if not service_path:
-        print("[error] Service path required", file=sys.stderr)
+        err("Service path obbligatorio.")
         sys.exit(1)
     service_path = str(Path(service_path).resolve())
 
@@ -418,16 +531,16 @@ def interactive_mode(settings: dict) -> tuple[str, str | None, str | None]:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Web Hunter - A/D Recon Suite")
-    parser.add_argument("--path", help="Path to service source")
-    parser.add_argument("--module", help="Run only this module (e.g. --module=sqlmap)")
-    parser.add_argument("--clone", metavar="GIT_URL", help="Clone colleague's report repo")
-    parser.add_argument("--clean", action="store_true", help="Remove recon containers and prune the container system")
-    parser.add_argument("--rebuild", action="store_true", help="Clean and rebuild the image from scratch before running")
-    parser.add_argument("--dev", action="store_true", help="Mount local modules/ over the image copy (test without rebuild)")
+    parser = argparse.ArgumentParser(description="CTF A/D Recon Suite")
+    parser.add_argument("--path",      help="Path al sorgente del servizio")
+    parser.add_argument("--module",    help="Esegui solo questo modulo (es. --module=sqlmap)")
+    parser.add_argument("--clone",     metavar="GIT_URL", help="Clona il repo report di un collega")
+    parser.add_argument("--clean",     action="store_true", help="Rimuovi container recon e pruna il sistema")
+    parser.add_argument("--rebuild",   action="store_true", help="Clean + rebuild immagine da zero")
+    parser.add_argument("--dev",       action="store_true", help="Monta modules/ locale (test senza rebuild)")
     parser.add_argument("--no-target", action="store_true", help="Salta l'avvio interattivo del servizio target")
-    parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--verbose",   action="store_true", help="Mostra stdout/stderr di tutti i tool")
+    parser.add_argument("--debug",     action="store_true", help="Mostra stato variabili (senza stdout tool)")
     args = parser.parse_args()
 
     settings = load_settings()
@@ -451,6 +564,18 @@ def main():
         if args.clone:
             clone_url = args.clone
 
+    dbg(
+        engine=engine,
+        service_path=service_path,
+        service_name=service_name,
+        report_dir=report_dir,
+        target_url=settings.get("target_url") or "(non impostato)",
+        module=args.module or "(tutti)",
+        dev=args.dev,
+        rebuild=args.rebuild,
+        no_target=args.no_target,
+    )
+
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     if clone_url:
@@ -460,7 +585,7 @@ def main():
     # Avvio interattivo del servizio target (solo se target_url non è già impostato)
     if not args.no_target:
         if settings.get("target_url"):
-            print(f"[target] Uso target_url da settings: {settings['target_url']}")
+            step(f"target_url da settings: {settings['target_url']}")
         else:
             _start_target_service(engine, service_path, settings)
 
@@ -490,12 +615,11 @@ def main():
         dev=args.dev,
     )
 
-    print(f"\n[done] Report: {report_dir}/report.md")
+    ok(f"Report: {report_dir}/report.md")
 
 
 if __name__ == "__main__":
     with open('assets/.logo/ascii_art.txt') as logo:
-        logo_ascii = logo.read()
-        print(logo_ascii)
+        print(logo.read())
 
     main()
