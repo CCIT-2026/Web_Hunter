@@ -1,232 +1,216 @@
 # Web Hunter — Report di Test Moduli
-> **Target servizio**: `/home/mimmo/Desktop/Pwnzer0tt1Shop` (Flask/Python backend, porta 80)  
-> **Engine**: Docker  
-> **Immagine**: `ctf-recon-suite:latest`  
-> **Data inizio**: 2026-07-10  
-> **Autore sezione**: Mimmo (testing singoli moduli)  
-> **Collega**: lavora su orchestratore generale e interazione tra moduli (incluso sqlmap/ghauri)
+
+Questo report documenta le attività di testing individuale dei moduli della toolsuite **Web Hunter** eseguiti in modalità single-module contro vari servizi target dell'ambiente CyberChallenge.IT.
 
 ---
 
-## Legenda
+## 🛠️ Ambiente e Modalità di Test Generale
 
-| Simbolo | Significato |
-|---------|-------------|
-| ✅ | Test passato — modulo funziona correttamente |
-| ❌ | Test fallito — bug/errore nel modulo |
-| ⏳ | In corso |
-| ⏭️ | Skippato (non applicabile allo stack del target) |
-| 🔲 | Da fare |
-
----
-
-## Ambiente di test
-
-- **Comando base**: `python3 start.py --path=/home/mimmo/Desktop/Pwnzer0tt1Shop --module=<MOD> --no-target --verbose --dev`
-- **`--dev`**: monta `modules/` e `orchestrator/` locali → usare sempre per applicare fix senza rebuild
-- **`--no-target`**: salta il prompt interattivo del servizio target
-- **Report output**: `Web_Hunter/reports/Pwnzer0tt1Shop/`
-
-### Settings correnti
-- `engine`: `docker`
-- `target_url`: `http://127.0.0.1:80`
-- `timeout_seconds`: `60` (alzato da 15 per sqlmap)
+Tutti i test sono stati condotti in **single-module mode** configurando come engine `docker` all'interno di `settings.json`.
+- **Comando base**: 
+  ```bash
+  python3 start.py --path=<SERVICE_PATH> --module=<MODULE_NAME> --no-target --verbose --dev
+  ```
+- **`--dev`**: Monta le cartelle locali `modules/` e `orchestrator/` nel container in esecuzione per testare istantaneamente le modifiche al codice.
+- **`--no-target`**: Salta la configurazione guidata del target via CLI.
 
 ---
 
-## Stack rilevato (Pwnzer0tt1Shop) — `detected_stack.json`
+## 📋 Riepilogo Esiti dei Moduli
 
-| Flag | Valore | Moduli attivati |
-|------|--------|-----------------|
-| language | `python` | — |
-| framework | `flask` | — |
-| has_php | `false` | → phpggc, symfony SKIP |
-| has_symfony_twig | `false` | → symfony SKIP |
-| has_grpc | `false` | → grpcurl SKIP |
-| has_file_upload | `false` | → slipit, exiftool, polyglot SKIP |
-| **has_sql_queries** | **`true`** | → sqlmap, ghauri (collega) |
-| **has_nosql** | **`true`** | → nosqli SKIP (ha_sql=true blocca trigger) |
-| uses_jwt | `false` | → jwt_tool SKIP |
-| has_eval_on_input | `false` | → fickling SKIP |
-| **db_present_in_domain** | **`true`** | → trufflehog, gitleaks |
-| has_outbound_request_on_input | `false` | → ssrf_generic SKIP |
-| has_graphql_endpoint | `false` | → graphql_generic SKIP |
-| has_xpath_parser | `false` | → xpath_generic SKIP |
-| has_file_path_from_input | `false` | → directory_traversal SKIP |
-| has_ldap_query | `false` | → ldap_generic SKIP |
-
-**12 endpoint trovati** — candidati SQLi principali: `POST /api/login` (f-string SQLi confermata a livello sorgente), `POST /api/donate`, `POST /api/sell`
+| Modulo | CCalendar | CheesyCheats | DutyFree | PCSS | Skypedia | Pwnzer0tt1Shop |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **mapping** | ✅ (0 ep) | ✅ (19 ep) | ✅ (0 ep) | ✅ (0 ep) | ✅ (13 ep) | ✅ (12 ep) |
+| **stack_detector** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **semgrep** | ✅ (3 find) | - | ✅ (5 find) | - | - | ✅ (9 find) |
+| **ripgrep** | - | - | - | - | - | ✅ (1 find) |
+| **jsluice** | - | - | - | - | - | ✅ (55 find) |
+| **trufflehog / gitleaks** | - | - | - | - | - | ✅ (0 find) |
+| **nuclei** | - | - | - | - | - | ✅ (10 find) |
+| **sstimap / commix** | - | - | - | - | - | ✅ (0 find) |
+| **xxeexploiter** | - | - | - | - | - | ⏭️ (skip) |
+| **phpggc** | ✅ (0 find) | - | - | - | - | - |
+| **symfony** | ⏭️ (skip) | - | ✅ (0 find) | - | - | - |
+| **grpcurl** | - | ✅ (32 find) | - | - | - | - |
+| **jwt_tool** | - | - | - | ⏭️ (skip) | - | - |
+| **nodejsscan** | - | - | - | - | ✅ (0 find) | ⏭️ (skip) |
 
 ---
 
-## TODO List — Pwnzer0tt1Shop
+## 🔍 Log di Esecuzione Dettagliati per Servizio
 
-### FASE 0 — Setup e Bootstrap
-- ✅ **[SETUP-1]** Build immagine Docker
-- ✅ **[SETUP-2]** Pwnzer0tt1Shop up su porta 80
-- ✅ **[SETUP-3]** `target_url` impostato
-- ✅ **[MODULE-mapping]** 12 endpoint trovati — `endpoints_map.json` OK
-- ✅ **[MODULE-stack_detector]** `detected_stack.json` OK
+### 1. Pwnzer0tt1Shop (Flask/Python Backend)
+- **Target URL**: `http://127.0.0.1:80`
+- **Stack Rilevato**: Python (Flask), SQL Queries: `true`, NoSQL: `true`, Database in domain: `true`
 
-### FASE 1 — Discovery
-- ✅ **[MODULE-semgrep]** 9 findings (vedi tabella sotto)
-- ✅ **[MODULE-ripgrep]** 1 finding (vedi tabella sotto)
-- ✅ **[MODULE-jsluice]** 55 findings (URL/endpoint dal frontend TS)
-- ✅ **[MODULE-trufflehog]** 0 findings — nessun segreto trovato
-- ✅ **[MODULE-gitleaks]** 0 findings — nessun segreto in git history
-- ✅ **[MODULE-nuclei]** 10 findings (vedi tabella sotto)
+#### Test del modulo: `semgrep`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Pwnzer0tt1Shop --module=semgrep --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  09:03:42  INFO      orchestrator.core  === Phase 1: bootstrap (mapping + stack_detector) ===
+  09:03:42  INFO      modules.mapping.endpoint_parser  Mapping: 12 endpoints
+  09:03:42  INFO      orchestrator.stack_detector  stack_detector done
+  09:03:42  INFO      orchestrator.core  === Single module mode: semgrep ===
+  09:03:46  INFO      modules.base_runner  semgrep: completed in 4.2s (9 findings)
+  ```
+  *Findings rilevanti*:
+  - **SQL Injection (High Confidence)**: f-string interpolation a `backend/app.py:111` in `WHERE username = '{username}'`.
+  - **SQLAlchemy Raw Execute (High Confidence)**: `sqlalchemy-execute-raw-query` a `backend/app.py:111`.
+  - **Docker Security (High Confidence)**: `missing-user` a `Dockerfile:20`.
+  - **Flask Debug (Medium Confidence)**: `debug-enabled` a `backend/app.py:272`.
 
-### FASE 2 — Injection
-- ⏭️ **[MODULE-sqlmap]** ci lavora il collega
-- ⏭️ **[MODULE-ghauri]** ci lavora il collega
-- ✅ **[MODULE-sstimap]** 0 findings
-- ✅ **[MODULE-commix]** 0 findings
-- ⏭️ **[MODULE-nosqli]** trigger non soddisfatto (has_sql=true blocca)
-- ⏭️ **[MODULE-ssrf/graphql/xpath/traversal/ldap]** trigger non soddisfatti
+#### Test del modulo: `ripgrep`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Pwnzer0tt1Shop --module=ripgrep --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  →  Avvio analisi  Pwnzer0tt1Shop  [ripgrep]...
+  [ripgrep] Status: completed | Findings: 1
+    [low] path_traversal | backend/app.py:229 | pattern='send_file\s*\(': return send_file('./db-data/log.txt', mimetype='text
+  ```
 
-### FASE 3 — Auth
-- ⏭️ **[MODULE-jwt_tool]** uses_jwt=false
-
-### FASE 4 — Lang-specific
-- ⏭️ **[MODULE-fickling]** has_eval_on_input=false
-- ⏭️ **[MODULE-phpggc]** has_php=false
-- ⏭️ **[MODULE-symfony]** has_symfony_twig=false
-- ✅ **[MODULE-nodejsscan]** skippato correttamente (language=python, non javascript)
-
-### FASE 5 — Upload
-- ⏭️ **[MODULE-slipit/exiftool/polyglot]** has_file_upload=false
-
-### FASE 6 — gRPC & XXE
-- ⏭️ **[MODULE-grpcurl]** has_grpc=false
-- ⏭️ **[MODULE-xxeexploiter]** skippato (no XML-consuming endpoints or XML parsers detected)
-
----
-
-## Anomalie e bug riscontrati
-
-| # | Modulo | Descrizione bug | File | Stato fix |
-|---|--------|----------------|------|-----------|
-| 1 | `mapping`, `stack_detector` | `run()` mancava `**kwargs` → `TypeError` in single-module mode | `modules/mapping/endpoint_parser.py:521`, `orchestrator/stack_detector.py:405` | ✅ Fixato 2026-07-10 |
-
----
-
-## Findings sul target Pwnzer0tt1Shop
-
-### semgrep (9 findings)
-
-| Confidence | Tipo | File:Riga | Dettaglio |
-|-----------|------|-----------|-----------|
-| high | injection | backend/app.py:111 | `tainted-sql-string` — f-string SQLi: `WHERE username = '{username}'` |
-| high | sql | backend/app.py:111 | `sqlalchemy-execute-raw-query` — query raw su connessione diretta |
-| high | injection | backend/app.py:111 | `django-sql-injection-cursor-execute` — match cross-rule |
-| high | injection | backend/app.py:145 | `nan-injection` — input utente va in contesto numerico |
-| medium | injection | backend/app.py:103 | `sql-injection-using-db-cursor-execute` |
-| medium | sql | backend/app.py:111 | `formatted-sql-query` — query con formato stringa |
-| high | semgrep | Dockerfile:20 | `missing-user` — container gira come root |
-| medium | semgrep | backend/app.py:272 | `app-run-param-config` — host=0.0.0.0 in app.run() |
-| medium | semgrep | backend/app.py:272 | `debug-enabled` — Flask debug=True in produzione |
-
-### ripgrep (1 finding)
-
-| Confidence | Tipo | File:Riga | Dettaglio |
-|-----------|------|-----------|-----------|
-| low | path_traversal | backend/app.py:229 | `send_file('./db-data/log.txt')` — path hardcoded, da verificare |
-
-### jsluice (55 findings)
-- URL/endpoint dal frontend TypeScript — principalmente riferimenti a `/api/*`
-- Nessun segreto hardcoded trovato (0 `secret` type)
-- Dettaglio completo in `reports/Pwnzer0tt1Shop/jsluice.json`
-
-### trufflehog / gitleaks
-- 0 findings — nessun segreto/credenziale nei file o nella git history
-
-### nuclei (10 findings)
-- Trovate 10 vulnerabilità di tipo Low/Info (tutte relative a `http-missing-security-headers` su http://127.0.0.1:80).
-
-### sstimap / commix / xxeexploiter
-- **sstimap**: 0 findings.
-- **commix**: 0 findings.
-- **xxeexploiter**: Skippato (nessun parser XML o endpoint XML-consuming rilevato nel codice).
+#### Test del modulo: `nuclei`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Pwnzer0tt1Shop --module=nuclei --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  →  Avvio analisi  Pwnzer0tt1Shop  [nuclei]...
+  09:16:17  INFO      modules.base_runner  nuclei: completed in 150.2s (10 findings)
+  ```
+  *Dettagli*: 10 riscontri di tipo Info relativi alla mancanza di header HTTP (`http-missing-security-headers` su `http://127.0.0.1:80`).
 
 ---
 
-# CCalendar — Report di Test Moduli
-> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/CCalendar` (PHP backend, porta 8443 HTTPS)  
-> **Data**: 2026-07-10  
+### 2. CCalendar (PHP Custom Backend)
+- **Target URL**: `https://127.0.0.1:8443`
+- **Stack Rilevato**: PHP (Custom Router), SQL Queries: `true`, File Path from input: `true`
 
-## Stack Rilevato
-- `language`: `php`
-- `has_php`: `true`
-- `has_sql_queries`: `true`
-- `has_file_path_from_input`: `true`
+#### Test del modulo: `semgrep`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/CCalendar --module=semgrep --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  11:09:06  INFO      orchestrator.core  === Single module mode: semgrep ===
+  11:09:11  INFO      modules.base_runner  semgrep: completed in 5.2s (3 findings)
+  ```
+  *Findings rilevanti*:
+  - **Credentials Leak (High Confidence)**: hardcoded secret a `/service/docker-compose.yml:10` e `:21`.
+  - **Private Key Exposure (High Confidence)**: private key memorizzata in chiaro a `/service/frontend/nginx/key.pem:1`.
 
-## Esiti Moduli Testati
-- ✅ **[MODULE-mapping]**: Eseguito con successo (0 endpoint estratti per via del router custom PHP non standard).
-- ✅ **[MODULE-stack_detector]**: Rilevato correttamente stack PHP e le vulnerabilità statiche.
-- ✅ **[MODULE-phpggc]**: Eseguito correttamente. Cerca chiamate a `unserialize()` nel codice e non trovandone restituisce 0 findings.
-- ✅ **[MODULE-semgrep]**: Trovati 3 segreti/credenziali hardcoded (chiavi private Nginx e password fittizie in docker-compose).
-- ⏭️ **[MODULE-symfony]**: Skippato correttamente (gated su framework Symfony/Twig).
-- ⏭️ **[MODULE-directory_traversal]**: Skippato (nessun endpoint parametrizzato mappato staticamente).
-
----
-
-# CheesyCheats — Report di Test Moduli
-> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/CheesyCheats` (Python/Django backend, porta 5555 gRPC)  
-> **Data**: 2026-07-10  
-
-## Stack Rilevato
-- `language`: `python`
-- `has_grpc`: `true`
-- `grpc_proto_files`: Rilevati tutti i file `.proto` (es: `client/cheesycheats.proto`, `api/cheesycheatsAPI.proto`).
-
-## Esiti Moduli Testati
-- ✅ **[MODULE-mapping]**: Estratti 19 endpoint correttamente.
-- ✅ **[MODULE-grpcurl]**: Eseguito con successo. Ha estratto 32 RPC definiti nei file `.proto` (es. `/grpc/Register`, `/grpc/LoginStep1`, `/grpc/SellCheat`) e li ha aggiunti a `endpoints_map.json` come pseudo-endpoint.
+#### Test del modulo: `phpggc`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/CCalendar --module=phpggc --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  11:05:24  INFO      orchestrator.core  === Single module mode: phpggc ===
+  11:05:24  INFO      modules.base_runner  phpggc: completed in 0.1s (0 findings)
+  ```
+  *Analisi*: Il tool ha scansionato staticamente i sorgenti alla ricerca di deserializzazioni `unserialize()`. Esito negativo coerente con lo stack del servizio.
 
 ---
 
-# DutyFree — Report di Test Moduli
-> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/DutyFree` (PHP backend)  
-> **Data**: 2026-07-10  
+### 3. CheesyCheats (Python/Django gRPC)
+- **Target URL**: `127.0.0.1:5555`
+- **Stack Rilevato**: Python, gRPC: `true`, File Upload: `true`
 
-## Stack Rilevato
-- `language`: `php`
-- `has_php`: `true`
-- `has_symfony_twig`: `true`
-- `has_file_upload`: `true` (trovato in `web/www/handlers/loyalty-scanner.php`)
-
-## Esiti Moduli Testati
-- ✅ **[MODULE-semgrep]**: 5 findings (rilevati segreti in `compose.yml` e criticità su decrittazione `openssl_decrypt` non validata in `User.php`, `ProductOrder.php`, e `OrderShare.php`).
-- ✅ **[MODULE-symfony]**: Eseguito correttamente (0 findings, il codice non fa uso diretto di Twig dinamico o segreti di framework in formato `.env`).
-- ⏭️ **[MODULE-slipit / exiftool / polyglot]**: Skippati (gated sulla presenza di endpoint mappati in `endpoints_map.json`, che è vuoto a causa del router custom del servizio).
-
----
-
-# PCSS — Report di Test Moduli
-> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/PCSS` (Python CLI app)  
-> **Data**: 2026-07-10  
-
-## Stack Rilevato
-- `language`: `python`
-- `uses_jwt`: `true` (trovato a `main.py:59` e `main.py:76`)
-
-## Esiti Moduli Testati
-- ✅ **[MODULE-mapping]**: Eseguito correttamente (0 endpoint HTTP estratti, trattandosi di CLI).
-- ✅ **[MODULE-jwt_tool]**: Eseguito e skippato correttamente (`skip: verifica JWT robusta, vedi main.py:59`). Valida perfettamente la logica di gating del modulo che rileva JWT ma salta l'attacco attivo in assenza di debolezze palesi.
+#### Test del modulo: `grpcurl`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/CheesyCheats --module=grpcurl --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  11:12:50  INFO      orchestrator.core  === Single module mode: grpcurl ===
+  11:13:00  INFO      modules.base_runner  grpcurl: completed in 10.0s (32 findings)
+  ```
+  *Dettagli*: Estrapolati 32 metodi RPC mappati dai file `.proto` di progetto (mancando il supporto reflection a runtime). Esempi di pseudo-endpoint registrati:
+  - `/grpc/Register`
+  - `/grpc/LoginStep1`
+  - `/grpc/SellCheat`
+  - `/grpc/Redeem`
 
 ---
 
-# Skypedia — Report di Test Moduli
-> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/Skypedia` (Javascript/Express backend)  
-> **Data**: 2026-07-10  
+### 4. DutyFree (PHP/Symfony Backend)
+- **Stack Rilevato**: PHP (Symfony), File Upload: `true`
 
-## Stack Rilevato
-- `language`: `javascript`
-- `framework`: `express`
-- `uses_jwt`: `true`
-- `has_file_upload`: `true`
+#### Test del modulo: `symfony`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/DutyFree --module=symfony --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  11:27:18  INFO      orchestrator.core  === Single module mode: symfony ===
+  11:27:19  INFO      modules.base_runner  symfony: completed in 1.3s (0 findings)
+  ```
+  *Analisi*: Il modulo ha correttamente verificato la presenza di dynamic Twig render o chiavi `APP_SECRET` corte nei file `.env`, non rilevando anomalie (0 findings).
 
-## Esiti Moduli Testati
-- ✅ **[MODULE-mapping]**: Estratti 13 endpoint correttamente da `server.mjs` ed `auth.mjs`.
-- ✅ **[MODULE-nodejsscan]**: Eseguito con successo (0 findings). Valida il caricamento dei moduli JavaScript/Node.js della suite ed esegue l'analisi statica nodejsscan senza errori.
+#### Test del modulo: `semgrep`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/DutyFree --module=semgrep --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  11:29:15  INFO      orchestrator.core  === Single module mode: semgrep ===
+  11:29:19  INFO      modules.base_runner  semgrep: completed in 4.2s (5 findings)
+  ```
+  *Findings rilevanti*:
+  - **OpenSSL Decrypt Bypass (Medium Confidence)**: Mancata verifica del tipo booleano restituito da `openssl_decrypt` in caso di errore in `/service/web/www/models/User.php:40`.
+  - **Outbound Request on Input (Medium Confidence)**: `/service/web/www/index.php:43` file name injection risks.
 
+---
+
+### 5. PCSS (Python CLI App)
+- **Stack Rilevato**: Python, Uses JWT: `true`
+
+#### Test del modulo: `jwt_tool`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/PCSS --module=jwt_tool --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  11:39:45  INFO      orchestrator.core  === Single module mode: jwt_tool ===
+  11:39:45  INFO      modules.base_runner  jwt_tool: skipped in 0.0s (0 findings)
+  ```
+  *Analisi*: La suite ha rilevato la firma robusta per il JWT in `main.py` (`looks_weak: false`), skippando in automatico gli attacchi attivi come previsto dalle specifiche di mitigazione della suite (`jwt_tool.json` salvato con skip reason coerente).
+
+---
+
+### 6. Skypedia (Express/Node.js)
+- **Stack Rilevato**: JavaScript (Express), File Upload: `true`, Uses JWT: `true`
+
+#### Test del modulo: `nodejsscan`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/Skypedia --module=nodejsscan --no-target --verbose --dev
+  ```
+- **Output (Estratto delle rilevazioni)**:
+  ```text
+  13:33:23  INFO      orchestrator.core  === Single module mode: nodejsscan ===
+  13:33:27  INFO      modules.base_runner  nodejsscan: completed in 3.7s (0 findings)
+  ```
+  *Analisi*: Nodejsscan si è avviato correttamente, scansionando i sorgenti `.mjs` e `.js` del servizio e uscendo con successo senza falsi positivi o errori di parser.
+
+---
+
+## 🐛 Bug Trovati e Risolti
+
+### Bug #1: TypeError in Single-Module Mode
+- **Descrizione**: L'avvio individuale dei moduli di bootstrap (`mapping` e `stack_detector`) falliva perché il core passava i parametri opzionali `stack` ed `endpoints` come keyword arguments non gestiti dalle firme originali delle rispettive funzioni `run()`.
+- **Risoluzione**: Modificate le firme inserendo `**kwargs` per ignorare in sicurezza i parametri non rilevanti:
+  - `modules/mapping/endpoint_parser.py` (linea 521)
+  - `orchestrator/stack_detector.py` (linea 405)
