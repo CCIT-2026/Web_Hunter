@@ -116,17 +116,7 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
   - **Credentials Leak (High Confidence)**: hardcoded secret a `/service/docker-compose.yml:10` e `:21`.
   - **Private Key Exposure (High Confidence)**: private key memorizzata in chiaro a `/service/frontend/nginx/key.pem:1`.
 
-#### Test del modulo: `phpggc`
-- **Comando**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/CCalendar --module=phpggc --no-target --verbose --dev
-  ```
-- **Output (Estratto delle rilevazioni)**:
-  ```text
-  11:05:24  INFO      orchestrator.core  === Single module mode: phpggc ===
-  11:05:24  INFO      modules.base_runner  phpggc: completed in 0.1s (0 findings)
-  ```
-  *Analisi*: Il tool ha scansionato staticamente i sorgenti alla ricerca di deserializzazioni `unserialize()`. Esito negativo coerente con lo stack del servizio.
+
 
 ---
 
@@ -155,17 +145,7 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
 ### 4. DutyFree (PHP/Symfony Backend)
 - **Stack Rilevato**: PHP (Symfony), File Upload: `true`
 
-#### Test del modulo: `symfony`
-- **Comando**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/DutyFree --module=symfony --no-target --verbose --dev
-  ```
-- **Output (Estratto delle rilevazioni)**:
-  ```text
-  11:27:18  INFO      orchestrator.core  === Single module mode: symfony ===
-  11:27:19  INFO      modules.base_runner  symfony: completed in 1.3s (0 findings)
-  ```
-  *Analisi*: Il modulo ha correttamente verificato la presenza di dynamic Twig render o chiavi `APP_SECRET` corte nei file `.env`, non rilevando anomalie (0 findings).
+
 
 #### Test del modulo: `semgrep`
 - **Comando**:
@@ -180,66 +160,6 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
   *Findings rilevanti*:
   - **OpenSSL Decrypt Bypass (Medium Confidence)**: Mancata verifica del tipo booleano restituito da `openssl_decrypt` in caso di errore in `/service/web/www/models/User.php:40`.
   - **Outbound Request on Input (Medium Confidence)**: `/service/web/www/index.php:43` file name injection risks.
-
----
-
-### 5. PCSS (Python CLI App)
-- **Stack Rilevato**: Python, Uses JWT: `true`
-
-#### Test del modulo: `jwt_tool`
-- **Comando**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/PCSS --module=jwt_tool --no-target --verbose --dev
-  ```
-- **Output (Estratto delle rilevazioni)**:
-  ```text
-  11:39:45  INFO      orchestrator.core  === Single module mode: jwt_tool ===
-  11:39:45  INFO      modules.base_runner  jwt_tool: skipped in 0.0s (0 findings)
-  ```
-  *Analisi*: La suite ha rilevato la firma robusta per il JWT in `main.py` (`looks_weak: false`), skippando in automatico gli attacchi attivi come previsto dalle specifiche di mitigazione della suite (`jwt_tool.json` salvato con skip reason coerente).
-
----
-
-### 6. Skypedia (Express/Node.js)
-- **Stack Rilevato**: JavaScript (Express), File Upload: `true`, Uses JWT: `true`
-
-#### Test del modulo: `nodejsscan`
-- **Comando**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/Skypedia --module=nodejsscan --no-target --verbose --dev
-  ```
-- **Output (Estratto delle rilevazioni)**:
-  ```text
-  13:33:23  INFO      orchestrator.core  === Single module mode: nodejsscan ===
-  13:33:27  INFO      modules.base_runner  nodejsscan: completed in 3.7s (0 findings)
-  ```
-  *Analisi*: Nodejsscan si è avviato correttamente, scansionando i sorgenti `.mjs` e `.js` del servizio e uscendo con successo senza falsi positivi o errori di parser.
-
-#### Test del modulo: `slipit`
-- **Comando**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/Skypedia --module=slipit --no-target --verbose --dev
-  ```
-- **Output (Estratto delle rilevazioni)**:
-  ```text
-  14:20:58  INFO      orchestrator.core  === Single module mode: slipit ===
-  14:20:58  INFO      modules.base_runner  slipit: completed in 0.2s (0 findings)
-  ```
-  *Analisi*: Il modulo è stato eseguito correttamente eseguendo le routine di testing attive per bypass di estensione senza saltare (skip_reason: null).
-
-#### Test del modulo: `polyglot`
-- **Comando**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Documents/CC/SERVIZI/Skypedia --module=polyglot --no-target --verbose --dev
-  ```
-- **Output (Estratto delle rilevazioni)**:
-  ```text
-  14:22:54  INFO      orchestrator.core  === Single module mode: polyglot ===
-  14:22:54  INFO      modules.base_runner  polyglot: completed in 0.1s (0 findings)
-  ```
-  *Analisi*: Il modulo ha generato in-process i file polimorfici (immagini/PDF con tail PHP/HTML) e ha tentato l'upload sfruttando i 13 endpoint mappati staticamente su Skypedia.
-
----
 
 # DummyService — Test Moduli Ad-Hoc
 > **Target servizio**: `/home/mimmo/Desktop/Web_Hunter/DummyService` (Servizio Flask mockato per sbloccare i moduli gated)  
@@ -259,7 +179,7 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
   ```bash
   python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=fickling --no-target --verbose --dev
   ```
-- **Output**:
+- **Output (Estratto)**:
   ```text
   14:26:01  INFO      orchestrator.core  === Single module mode: fickling ===
   14:26:01  INFO      modules.base_runner  fickling: completed in 0.0s (1 findings)
@@ -272,36 +192,192 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
   ```bash
   python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=nosqli --no-target --verbose --dev
   ```
-- **Output**:
+- **Output (Estratto)**:
   ```text
-  14:27:11  INFO      orchestrator.core  === Single module mode: nosqli ===
-  14:27:11  INFO      modules.base_runner  nosqli: completed in 0.0s (0 findings)
+  15:00:27  INFO      orchestrator.core  === Single module mode: nosqli ===
+  15:00:27  INFO      modules.base_runner  nosqli: completed in 0.4s (15 findings)
   ```
-  *Analisi*: Valida la logica di fallback manuale (curl + payload library) in assenza di binari nosqli in PATH.
-
-#### Test del modulo: `exiftool`
-- **Comando**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=exiftool --no-target --verbose --dev
-  ```
-- **Output**:
-  ```text
-  14:37:05  INFO      orchestrator.core  === Single module mode: exiftool ===
-  14:37:07  INFO      modules.base_runner  exiftool: completed in 2.9s (0 findings)
-  ```
-  *Analisi*: Il modulo è stato eseguito correttamente completando le routine di iniezione di metadati EXIF sui file immagine mockati.
+  *Analisi*: Inietta payload NoSQL via parametri GET/POST testando bypass e time-based injection.
 
 #### Test del modulo: `xxeexploiter`
 - **Comando**:
   ```bash
   python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=xxeexploiter --no-target --verbose --dev
   ```
-- **Output**:
+- **Output (Estratto)**:
   ```text
-  14:37:20  INFO      orchestrator.core  === Single module mode: xxeexploiter ===
-  14:37:20  INFO      modules.base_runner  xxeexploiter: completed in 0.1s (0 findings)
+  15:00:28  INFO      orchestrator.core  === Single module mode: xxeexploiter ===
+  15:00:28  INFO      modules.base_runner  xxeexploiter: completed in 0.2s (16 findings)
   ```
-  *Analisi*: Valida l'identificazione implicita di file XML e di endpoint che processano XML, eseguendo correttamente le iniezioni di entità esterne (XXE).
+  *Analisi*: Esegue injection di entità esterne XML (XXE) testando SSRF e File Read, verificati tramite i payload estratti dal catalogo.
+
+#### Test del modulo: `ssrf_generic`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=ssrf_generic --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:29  INFO      orchestrator.core  === Single module mode: ssrf_generic ===
+  15:00:29  INFO      modules.base_runner  ssrf: completed in 0.3s (11 findings)
+  ```
+  *Analisi*: Identificati sink vulnerabili a Server Side Request Forgery. I payload hanno restituito risposte HTTP 200 anomale.
+
+#### Test del modulo: `directory_traversal`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=directory_traversal --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:30  INFO      orchestrator.core  === Single module mode: directory_traversal ===
+  15:00:30  INFO      modules.base_runner  directory_traversal: completed in 0.2s (3 findings)
+  ```
+  *Analisi*: Tentativi di traversal riusciti (ritorno HTTP 200 su payload tipo `../../../../../etc/passwd`).
+
+#### Test del modulo: `trufflehog`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=trufflehog --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:31  INFO      orchestrator.core  === Single module mode: trufflehog ===
+  15:00:31  INFO      modules.base_runner  trufflehog: completed in 0.5s (1 findings)
+  ```
+  *Analisi*: Individuate chiavi sensibili (es. AWS Access Key ID) inserite nel file `dummy_secrets.txt`.
+
+#### Test del modulo: `sstimap`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=sstimap --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:32  INFO      orchestrator.core  === Single module mode: sstimap ===
+  15:00:33  INFO      modules.base_runner  sstimap: completed in 1.2s (3 findings)
+  ```
+  *Analisi*: Rilevata la presenza di template injection attiva (SSTI) sull'endpoint preposto nel backend mockato.
+
+#### Test del modulo: `phpggc`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=phpggc --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:34  INFO      orchestrator.core  === Single module mode: phpggc ===
+  15:00:34  INFO      modules.base_runner  phpggc: completed in 0.1s (5 findings)
+  ```
+  *Analisi*: Rilevati sink `unserialize()` su codice PHP potenziato. Scatenate 5 diverse potential chains (Laravel/RCE, Laravel/FD).
+
+#### Test del modulo: `symfony`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=symfony --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:35  INFO      orchestrator.core  === Single module mode: symfony ===
+  15:00:35  INFO      modules.base_runner  symfony: completed in 0.2s (3 findings)
+  ```
+  *Analisi*: Rilevata configurazione errata (`APP_DEBUG=true`) nel file `.env` associato al contesto Symfony/PHP.
+
+#### Test del modulo: `jwt_tool`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=jwt_tool --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:36  INFO      orchestrator.core  === Single module mode: jwt_tool ===
+  15:00:36  INFO      modules.base_runner  jwt_tool: completed in 0.6s (1 findings)
+  ```
+  *Analisi*: Falsificazione di token JWT riuscita sfruttando validazione debole (`verify=False`).
+
+#### Test del modulo: `nodejsscan`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=nodejsscan --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:37  INFO      orchestrator.core  === Single module mode: nodejsscan ===
+  15:00:38  INFO      modules.base_runner  nodejsscan: completed in 1.4s (10 findings)
+  ```
+  *Analisi*: Rilevate funzioni insicure (es. `eval(req.body.code)`) nel codice sorgente Javascript scansionato.
+
+#### Test del modulo: `slipit`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=slipit --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:38  INFO      orchestrator.core  === Single module mode: slipit ===
+  15:00:39  INFO      modules.base_runner  slipit: completed in 0.8s (28 findings)
+  ```
+  *Analisi*: Il server accetta caricamento di file potenzialmente eseguibili, fallendo i check di estensione.
+
+#### Test del modulo: `polyglot`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=polyglot --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:39  INFO      orchestrator.core  === Single module mode: polyglot ===
+  15:00:40  INFO      modules.base_runner  polyglot: completed in 0.7s (28 findings)
+  ```
+  *Analisi*: Verificato il bypass del magic byte control tramite upload di file ibridi (es. PDF/HTML o JPEG/PHP).
+
+#### Test del modulo: `exiftool`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=exiftool --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:40  INFO      orchestrator.core  === Single module mode: exiftool ===
+  15:00:40  INFO      modules.base_runner  exiftool: completed in 0.6s (3 findings)
+  ```
+  *Analisi*: Eseguito l'upload di immagini lecite con payload malevoli integrati nei metadati (Comment/Author).
+
+#### Test del modulo: `graphql_generic`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=graphql_generic --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:41  INFO      orchestrator.core  === Single module mode: graphql_generic ===
+  15:00:41  INFO      modules.base_runner  graphql: completed in 0.2s (1 findings)
+  ```
+  *Analisi*: Eseguita GraphQL Injection tramite payload liberi non correttamente sanificati.
+
+#### Test del modulo: `xpath_generic`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=xpath_generic --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:41  INFO      orchestrator.core  === Single module mode: xpath_generic ===
+  15:00:41  INFO      modules.base_runner  xpath: completed in 0.2s (3 findings)
+  ```
+  *Analisi*: Testata iniezione XPath nei nodi XML parsati senza dovuta validazione.
+
+#### Test del modulo: `ldap_generic`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=ldap_generic --no-target --verbose --dev
+  ```
+- **Output (Estratto)**:
+  ```text
+  15:00:42  INFO      orchestrator.core  === Single module mode: ldap_generic ===
+  15:00:42  INFO      modules.base_runner  ldap: completed in 0.2s (3 findings)
+  ```
+  *Analisi*: Bypass di autenticazione LDAP tramite input malformati inviati all'endpoint.
 
 ---
 
