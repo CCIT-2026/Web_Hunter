@@ -187,10 +187,9 @@ class Orchestrator:
             try:
                 fn = _load_runner(mod_name)
                 fn(self.service_root, self.service_name, self.report_dir, self.settings)
-            except ImportError:
-                # Runner not implemented yet — write a placeholder report
-                logger.warning("Runner not found for '%s' (stub run)", mod_name)
-                self._write_stub_report(mod_name, "error", f"runner module not implemented: {mod_name}")
+            except Exception as exc:
+                logger.exception("Bootstrap module '%s' failed", mod_name)
+                self._write_stub_report(mod_name, "error", str(exc))
 
     # -----------------------------------------------------------------------
     # Single-module mode
@@ -215,6 +214,8 @@ class Orchestrator:
         except Exception as exc:
             logger.exception("Module %s raised", module_name)
             result = exc
+
+        self._generate_markdown_report()
         return {module_name: result}
 
     # -----------------------------------------------------------------------

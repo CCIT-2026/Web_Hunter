@@ -8,9 +8,8 @@ Usa --batch --level=2 --risk=1 (test locali, no ban risk).
 Output: reports/<service>/sqlmap.json
 """
 
-import json
-import tempfile
-from pathlib import Path
+import json as _json
+import re
 
 from modules.base_runner import BaseRunner, make_run_fn
 
@@ -47,47 +46,59 @@ class SqlmapRunner(BaseRunner):
         return "completed", None
 
     def _test_endpoint(self, url: str, ep: dict):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            out_dir = Path(tmpdir)
-            cmd = [
-                "sqlmap", "-u", url,
-                "--batch", "--level=2", "--risk=1",
-                "--output-dir", str(out_dir),
-                "--format=JSON",
-                "--timeout", str(self.timeout),
-            ]
-            # Add POST data if method is POST
-            if ep["method"] == "POST" and ep.get("params"):
-                data = "&".join(f"{p['name']}=TEST" for p in ep["params"] if p["location"] == "body")
-                if data:
-                    cmd += ["--data", data]
+        cmd = [
+            "sqlmap", "-u", url,
+            "--batch", "--level=2", "--risk=1",
+            "--timeout", str(self.timeout),
+        ]
 
-            rc, stdout, stderr = self.sh(cmd, timeout=self.timeout * 4)
-            if rc == -1:
-                return
+        body_params = [p for p in ep.get("params", []) if p["location"] == "body"]
+        query_params = [p for p in ep.get("params", []) if p["location"] == "query"]
 
-            # Parse sqlmap JSON output from output dir
-            for json_file in out_dir.rglob("*.json"):
-                try:
-                    data = json.loads(json_file.read_text())
-                except Exception:
-                    continue
-                vulns = data.get("data", [])
-                for v in vulns:
-                    place = v.get("place", "")
-                    param = v.get("parameter", "")
-                    payloads = v.get("data", {})
-                    for ptype, pdata in payloads.items():
-                        self.add_finding(
-                            type_="sqli",
-                            file_=ep["file"],
-                            line=ep["line"],
-                            endpoint=ep["path"],
-                            method=ep["method"],
-                            confidence="high",
-                            detail=f"SQLi confirmed: place={place} param={param} technique={ptype}",
-                            param=param,
-                        )
+        if ep["method"] in ("POST", "PUT", "PATCH") and body_params:
+            use_json = any(p.get("encoding") == "json" for p in body_params)
+            if use_json:
+                payload = _json.dumps({p["name"]: "SQLITEST" for p in body_params})
+                cmd += ["--data", payload, "-H", "Content-Type: application/json"]
+            else:
+                cmd += ["--data", "&".join(f"{p['name']}=SQLITEST" for p in body_params)]
+        elif query_params:
+            qs = "&".join(f"{p['name']}=SQLITEST" for p in query_params)
+            url = f"{url}?{qs}"
+            cmd[cmd.index("-u") + 1] = url
+
+        rc, stdout, stderr = self.sh(cmd, timeout=self.timeout * 4)
+        if rc == -1:
+            return
+
+        # sqlmap writes results as text; parse its stdout for confirmed findings
+        # Patterns: "Parameter: X (POST)" / "Type: " / "is vulnerable"
+        current_param = None
+        current_type = None
+        for line in stdout.splitlines():
+            low = line.lower()
+            if "parameter:" in low:
+                # "Parameter: username (POST)" or "Parameter: username (GET)"
+                m = re.search(r"parameter:\s*['\"]?([^'\"(]+)['\"]?\s*\(", line, re.I)
+                if m:
+                    current_param = m.group(1).strip()
+            if "type:" in low and current_param:
+                m = re.search(r"type:\s*(.+)", line, re.I)
+                if m:
+                    current_type = m.group(1).strip()
+            if ("is vulnerable" in low or "appears to be" in low) and current_param:
+                self.add_finding(
+                    type_="sqli",
+                    file_=ep["file"],
+                    line=ep["line"],
+                    endpoint=ep["path"],
+                    method=ep["method"],
+                    confidence="high",
+                    detail=f"sqlmap: param={current_param} technique={current_type or 'unknown'}",
+                    param=current_param,
+                )
+                current_param = None
+                current_type = None
 
 
 run = make_run_fn(SqlmapRunner)

@@ -19,34 +19,22 @@ logger = logging.getLogger(__name__)
 _CONF_MAP = {"high": "high", "error": "high", "warning": "medium", "info": "low"}
 
 
-def _true_line(path: "Path", semgrep_line: int | None) -> int | None:
-    """Mappa il numero di riga di semgrep alla riga reale nel file.
+def _line_from_offset(path: "Path", offset: int) -> int | None:
+    """Ricava il numero di riga (1-based) da un byte offset nel file.
 
-    Senza login al cloud Semgrep, start.line conta solo le righe non-vuote
-    (le righe vuote vengono saltate dal parser interno). Questa funzione
-    conta le righe non-vuote nel file reale e restituisce la posizione
-    1-based corrispondente nell'intero file (righe vuote incluse).
+    start.offset di semgrep è un conteggio di byte dall'inizio del file: è
+    deterministico e non dipende da righe vuote né da login al cloud. Basta
+    contare i newline prima dell'offset per avere la riga esatta.
     """
-    if semgrep_line is None:
-        return None
     try:
-        file_lines = path.read_text(errors="replace").splitlines()
+        text = path.read_text(errors="replace")
     except Exception as e:
-        logger.warning("_true_line: impossibile leggere %s: %s", path, e)
-        return semgrep_line
-
-    nonblank = 0
-    for i, line in enumerate(file_lines):
-        if line.strip():
-            nonblank += 1
-            if nonblank == semgrep_line:
-                true_line = i + 1
-                if true_line != semgrep_line:
-                    logger.debug("_true_line: %s %d → %d", path.name, semgrep_line, true_line)
-                return true_line
-
-    logger.warning("_true_line: %s semgrep_line=%d supera il totale non-blank=%d", path.name, semgrep_line, nonblank)
-    return semgrep_line
+        logger.warning("_line_from_offset: impossibile leggere %s: %s", path, e)
+        return None
+    if offset > len(text):
+        logger.warning("_line_from_offset: offset %d fuori dal file %s (%d chars)", offset, path.name, len(text))
+        return None
+    return text[:offset].count("\n") + 1
 
 # Tipi di finding semgrep → tipo interno (best-effort, poi l'analista verifica)
 _RULE_TO_TYPE = re.compile(
@@ -88,7 +76,8 @@ class SemgrepRunner(BaseRunner):
             rel_path = result.get("path", "")
             start   = result.get("start", {})
             extra   = result.get("extra", {})
-            line_no = _true_line(self.service_root / rel_path, start.get("line"))
+            offset = start.get("offset")
+            line_no = _line_from_offset(self.service_root / rel_path, offset) if offset is not None else start.get("line")
             message = extra.get("message", check_id)
 
             # Match check_id against known type keywords

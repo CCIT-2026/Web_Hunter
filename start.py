@@ -11,19 +11,25 @@ Non c'è Docker-in-Docker: è un normale orchestratore host-side che gestisce co
 fratelli sulla stessa rete host.
 
 Usage:
-  ./start.py                              # interattivo
-  ./start.py --path=/srv/targets/webapp   # non-interattivo
+  ./start.py                                           # interattivo
+  ./start.py --path=/srv/targets/webapp                # non-interattivo
   ./start.py --path=/srv/targets/webapp --module=sqlmap
   ./start.py --path=/srv/targets/webapp --clone=git@10.0.0.2:reports/webapp
   ./start.py --path=/srv/targets/webapp --clean        # prune + rimuovi container e immagine
+  ./start.py --rebuild                                 # clean + rebuild da zero, poi avvia (chiede il path se manca --path)
+  ./start.py --path=/srv/targets/webapp --rebuild      # clean + rebuild + avvia sul servizio dato
 """
 
 import argparse
 import hashlib
 import json
 import os
+import re
+import socket
 import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
 _HERE = Path(__file__).parent.resolve()
@@ -113,12 +119,14 @@ def _clean(engine: str):
     print("[clean] Done.")
 
 
-def _build_image(engine: str):
+def _build_image(engine: str, no_cache: bool = False):
     dockerfile = _HERE / "Dockerfile"
     if not dockerfile.exists():
         print(f"[error] Dockerfile not found at {dockerfile}", file=sys.stderr)
         sys.exit(1)
     cmd = [engine, "build", "-t", _IMAGE_NAME, str(_HERE)]
+    if no_cache:
+        cmd.insert(2, "--no-cache")
     print(f"[build] {' '.join(cmd)}")
     r = subprocess.run(cmd)
     if r.returncode != 0:
@@ -135,6 +143,7 @@ def _run_analysis(
     module: str | None = None,
     verbose: bool = False,
     debug: bool = False,
+    dev: bool = False,
 ):
     """Launch or re-use the analysis container."""
     container = _container_name(service_path)
@@ -156,6 +165,9 @@ def _run_analysis(
         "-e", f"SERVICE_ROOT=/service",
         "-e", f"REPORT_DIR=/reports/{service_name}",
     ]
+    if dev:
+        cmd += ["-v", f"{_HERE}/modules:/app/modules:ro,z"]
+        cmd += ["-v", f"{_HERE}/orchestrator:/app/orchestrator:ro,z"]
     if module:
         cmd += ["-e", f"SINGLE_MODULE={module}"]
     if verbose:
@@ -180,6 +192,196 @@ def _clone_reports(engine: str, clone_url: str, report_dir: str, service_name: s
     # Pull latest if already cloned
     ok2, msg = git_sync.pull(report_dir)
     print(f"[sync] Pull: {msg}")
+
+
+# ---------------------------------------------------------------------------
+# Target service launcher
+# ---------------------------------------------------------------------------
+
+_BURP_RESERVED = {8080}
+
+
+def _is_port_busy(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex((host, port)) == 0
+
+
+def _find_free_ports(exclude: set[int], count: int = 3) -> list[int]:
+    found, p = [], 1024
+    while len(found) < count and p < 65535:
+        if p not in exclude and not _is_port_busy("127.0.0.1", p):
+            found.append(p)
+        p += 1
+    return found
+
+
+def _detect_compose_file(service_path: str) -> "Path | None":
+    root = Path(service_path)
+    subdirs = [root] + [d for d in root.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+        for base in subdirs:
+            p = base / name
+            if p.exists():
+                return p
+    return None
+
+
+def _detect_service_port(service_path: str, compose_file: "Path | None") -> "int | None":
+    if compose_file:
+        text = compose_file.read_text(errors="replace")
+        m = re.search(r'(?:^|\s)["\']?(?:\d{1,3}(?:\.\d{1,3}){3}:)?(\d{2,5}):\d{2,5}', text, re.M)
+        if m:
+            return int(m.group(1))
+    for df in Path(service_path).rglob("Dockerfile*"):
+        m = re.search(r"^EXPOSE\s+(\d+)", df.read_text(errors="replace"), re.M)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _replace_port_in_service(
+    service_path: str,
+    old_host: str, old_port: int,
+    new_host: str, new_port: int,
+) -> list[str]:
+    """Aggiorna host:port in tutti i file rilevanti del servizio (compose, Dockerfile, client, env)."""
+    root = Path(service_path)
+    _SKIP = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
+    _TEXT_EXT = {".yml", ".yaml", ".py", ".js", ".ts", ".jsx", ".tsx",
+                 ".rb", ".go", ".env", ".conf", ".toml", ".ini"}
+    changed = []
+
+    def _sub(text: str, f: Path) -> str:
+        t = text
+        if f.suffix in {".yml", ".yaml"} or "Dockerfile" in f.name:
+            # "OLD_HOST:OLD_PORT:N" o bare "OLD_PORT:N" → "NEW_HOST:NEW_PORT:N"
+            t = re.sub(
+                rf'(["\']?)(?:{re.escape(old_host)}:)?{old_port}:(\d+)',
+                rf'\g<1>{new_host}:{new_port}:\g<2>',
+                t,
+            )
+        # client/config: localhost:PORT e old_host:PORT
+        for alias in (old_host, "localhost"):
+            t = t.replace(f"{alias}:{old_port}", f"{new_host}:{new_port}")
+        return t
+
+    for f in root.rglob("*"):
+        if not f.is_file() or any(s in f.parts for s in _SKIP):
+            continue
+        if f.suffix not in _TEXT_EXT and not re.search(r"Dockerfile|docker-compose|client\b|\.env", f.name):
+            continue
+        try:
+            original = f.read_text(errors="replace")
+            updated = _sub(original, f)
+            if updated != original:
+                f.write_text(updated)
+                changed.append(str(f.relative_to(root)))
+        except Exception:
+            pass
+    return changed
+
+
+def _wait_for_service(url: str, timeout: int = 20) -> bool:
+    print(f"[target] Attendo {url}", end="", flush=True)
+    for _ in range(timeout):
+        try:
+            urllib.request.urlopen(url, timeout=1)
+            print(" OK")
+            return True
+        except Exception:
+            print(".", end="", flush=True)
+            time.sleep(1)
+    print(" timeout")
+    return False
+
+
+def _start_target_service(engine: str, service_path: str, settings: dict) -> "str | None":
+    """Avvia interattivamente il servizio target. Ritorna target_url o None se saltato."""
+    root = Path(service_path)
+    compose_file = _detect_compose_file(service_path)
+
+    # Mostra file di primo livello
+    entries = sorted(
+        (e.name + ("/" if e.is_dir() else "") for e in root.iterdir() if not e.name.startswith(".")),
+        key=lambda x: (not x.endswith("/"), x),
+    )
+    print("\n[target] File nel servizio:")
+    for e in entries:
+        print(f"  {e}")
+
+    if compose_file:
+        # Loop: chiede conferma finché l'utente non dice sì
+        while True:
+            ans = _ask(f"\nPosso avviare con `{engine} compose up -d`? [s/n/skip]", "s").lower()
+            if ans == "skip":
+                return None
+            if ans in ("s", "si", "sì", "y", "yes"):
+                break
+            # n: chiedi comandi pre-avvio, poi richiedi
+            while True:
+                cmd = _ask("Comando da runnare prima").strip()
+                if cmd:
+                    print(f"[target] $ {cmd}")
+                    subprocess.run(cmd, shell=True, cwd=service_path)
+                if _ask("Altro da runnare? [s/n]", "n").lower() not in ("s", "si", "sì", "y", "yes"):
+                    break
+    else:
+        print("\n[target] Nessun docker-compose trovato.")
+        while True:
+            cmd = _ask("Comando per avviare il servizio").strip()
+            if cmd:
+                print(f"[target] $ {cmd}")
+                subprocess.run(cmd, shell=True, cwd=service_path)
+            if _ask("Altro da runnare? [s/n]", "n").lower() not in ("s", "si", "sì", "y", "yes"):
+                break
+
+    # Rileva host:port
+    host, port = "127.0.0.1", _detect_service_port(service_path, compose_file)
+    if port is None:
+        try:
+            port = int(_ask("Porta non rilevata automaticamente. Inseriscila", "5000"))
+        except ValueError:
+            port = 5000
+
+    # Gestione conflitto porta
+    if _is_port_busy(host, port):
+        print(f"\n[target] La porta {port} è occupata su {host}.")
+        alt_host = "127.0.0.2"
+        if not _is_port_busy(alt_host, port):
+            print(f"[target] Cambio interfaccia → {alt_host}:{port}")
+            changed = _replace_port_in_service(service_path, host, port, alt_host, port)
+            if changed:
+                print(f"[target] Aggiornati: {', '.join(changed)}")
+            host = alt_host
+        else:
+            free = _find_free_ports(exclude=_BURP_RESERVED | {port})
+            print(f"[target] Porte libere: {', '.join(map(str, free))}")
+            try:
+                new_port = int(_ask("Quale porta usare?", str(free[0]) if free else "5001"))
+            except ValueError:
+                new_port = free[0] if free else 5001
+            changed = _replace_port_in_service(service_path, host, port, host, new_port)
+            if changed:
+                print(f"[target] Aggiornati: {', '.join(changed)}")
+            port = new_port
+
+    # Avvia (solo se c'è compose; altrimenti l'utente lo ha già avviato coi pre-comandi)
+    if compose_file:
+        print(f"\n[target] $ {engine} compose up -d")
+        r = subprocess.run([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
+        if r.returncode != 0:
+            print("[target] Avvio fallito.")
+            return None
+
+    target_url = f"http://{host}:{port}"
+    _wait_for_service(target_url)
+
+    # Salva in settings.json
+    settings["target_url"] = target_url
+    _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+    print(f"[target] target_url salvato → {target_url}")
+    return target_url
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +423,9 @@ def main():
     parser.add_argument("--module", help="Run only this module (e.g. --module=sqlmap)")
     parser.add_argument("--clone", metavar="GIT_URL", help="Clone colleague's report repo")
     parser.add_argument("--clean", action="store_true", help="Remove recon containers and prune the container system")
+    parser.add_argument("--rebuild", action="store_true", help="Clean and rebuild the image from scratch before running")
+    parser.add_argument("--dev", action="store_true", help="Mount local modules/ over the image copy (test without rebuild)")
+    parser.add_argument("--no-target", action="store_true", help="Salta l'avvio interattivo del servizio target")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
@@ -252,8 +457,18 @@ def main():
         _clone_reports(engine, clone_url, report_dir, service_name)
         return
 
-    # Ensure image is built
-    _build_image(engine)
+    # Avvio interattivo del servizio target (solo se target_url non è già impostato)
+    if not args.no_target:
+        if settings.get("target_url"):
+            print(f"[target] Uso target_url da settings: {settings['target_url']}")
+        else:
+            _start_target_service(engine, service_path, settings)
+
+    if args.rebuild:
+        _clean(engine)
+        _build_image(engine, no_cache=True)
+    else:
+        _build_image(engine)
 
     # Init git repo in report_dir for incremental sync
     sys.path.insert(0, str(_HERE))
@@ -272,6 +487,7 @@ def main():
         module=args.module,
         verbose=args.verbose,
         debug=args.debug,
+        dev=args.dev,
     )
 
     print(f"\n[done] Report: {report_dir}/report.md")

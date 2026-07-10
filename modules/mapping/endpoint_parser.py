@@ -83,18 +83,141 @@ def _detect_auth_near(lines: list[str], center: int, window: int = 6):
 # Path-param extraction helpers
 # ---------------------------------------------------------------------------
 
+# Body / query param patterns — direct access
+_DIRECT_BODY: list[re.Pattern] = [
+    # Flask: request.form / request.values
+    re.compile(r"""request\s*\.\s*(?:form|values)\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    # Flask: request.json / request.get_json()
+    re.compile(r"""request\s*\.\s*(?:json|get_json\s*\([^)]*\))\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    # Django: request.POST
+    re.compile(r"""request\s*\.\s*POST\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    # Express: req.body
+    re.compile(r"""req\s*\.\s*body\s*(?:\[['"`]([^'"`]+)['"`]\]|\.([a-zA-Z_]\w*))"""),
+    # PHP: $_POST / $_REQUEST
+    re.compile(r"""\$_(?:POST|REQUEST)\s*\[['"]([^'"]+)['"]\]"""),
+]
+_DIRECT_QUERY: list[re.Pattern] = [
+    # Flask: request.args
+    re.compile(r"""request\s*\.\s*args\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    # Django: request.GET
+    re.compile(r"""request\s*\.\s*GET\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    # Express: req.query
+    re.compile(r"""req\s*\.\s*query\s*(?:\[['"`]([^'"`]+)['"`]\]|\.([a-zA-Z_]\w*))"""),
+    # PHP: $_GET
+    re.compile(r"""\$_GET\s*\[['"]([^'"]+)['"]\]"""),
+]
+# Detects: varname = request.get_json() / request.form / request.json / request.args
+_ASSIGN_REQUEST = re.compile(
+    r"""(\w+)\s*=\s*request\s*\.\s*(form|json|get_json\s*\([^)]*\)|args|values)"""
+)
+
+
+def _scan_handler_params(lines: list[str], def_idx: int, max_lines: int = 50) -> list[dict]:
+    """Scan handler body for request parameter accesses (direct and via alias variable)."""
+    params: list[dict] = []
+    seen: set[tuple] = set()
+
+    # Stop at next top-level def / class / decorator (indent == 0) to avoid
+    # leaking params from a subsequent handler into this one.
+    end = min(def_idx + max_lines, len(lines))
+    body: list[str] = []
+    for idx in range(def_idx, end):
+        ln = lines[idx]
+        stripped = ln.lstrip()
+        if stripped and len(ln) - len(stripped) == 0 and (
+            stripped.startswith("def ")
+            or stripped.startswith("async def ")
+            or stripped.startswith("class ")
+            or stripped.startswith("@")
+        ):
+            break
+        body.append(ln)
+
+    def _add(name: str, location: str, encoding: str = "form") -> None:
+        k = (name, location)
+        if k not in seen:
+            seen.add(k)
+            params.append({"name": name, "location": location, "type": "string", "encoding": encoding})
+
+    def _first_group(m: re.Match) -> str | None:
+        return next((m.group(g) for g in range(1, m.lastindex + 1) if m.group(g)), None)
+
+    # Pass 1: collect alias assignments (data = request.get_json(), etc.)
+    # Map varname → (location, encoding)
+    aliases: dict[str, tuple[str, str]] = {}
+    for line in body:
+        m = _ASSIGN_REQUEST.search(line)
+        if m:
+            src = m.group(2).lower()
+            if "args" in src:
+                aliases[m.group(1)] = ("query", "form")
+            elif "json" in src or "get_json" in src:
+                aliases[m.group(1)] = ("body", "json")
+            else:
+                aliases[m.group(1)] = ("body", "form")
+
+    # Compile alias patterns once
+    alias_pats = {
+        varname: (
+            re.compile(
+                r"\b" + re.escape(varname)
+                + r"""\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""
+            ),
+            loc_enc,
+        )
+        for varname, loc_enc in aliases.items()
+    }
+
+    # Body patterns with encoding hints: (pattern, encoding)
+    _BODY_WITH_ENC = [
+        (_DIRECT_BODY[0], "form"),   # request.form / request.values
+        (_DIRECT_BODY[1], "json"),   # request.json / request.get_json()
+        (_DIRECT_BODY[2], "form"),   # request.POST (Django)
+        (_DIRECT_BODY[3], "json"),   # req.body (Express — assume JSON)
+        (_DIRECT_BODY[4], "form"),   # $_POST / $_REQUEST
+    ]
+
+    # Pass 2: scan each line
+    for line in body:
+        for pat, enc in _BODY_WITH_ENC:
+            for m in pat.finditer(line):
+                name = _first_group(m)
+                if name:
+                    _add(name, "body", enc)
+        for pat in _DIRECT_QUERY:
+            for m in pat.finditer(line):
+                name = _first_group(m)
+                if name:
+                    _add(name, "query", "form")
+        for pat, (loc, enc) in alias_pats.values():
+            for m in pat.finditer(line):
+                name = _first_group(m)
+                if name:
+                    _add(name, loc, enc)
+
+    return params
+
+
 def _path_params(route_str: str) -> list[dict]:
     """Extract path params from Flask/Django/FastAPI/Express/Go templates."""
-    params = []
-    # Flask/Werkzeug: <type:name> or <name>
+    seen: set[str] = set()
+    params: list[dict] = []
+
+    def _add(name: str) -> None:
+        if name not in seen:
+            seen.add(name)
+            params.append({"name": name, "location": "path", "type": "string"})
+
+    # Flask/Werkzeug/FastAPI/Django: <type:name> or <name>
     for m in re.finditer(r"<(?:[a-z_]+:)?([a-zA-Z_]\w*)>", route_str):
-        params.append({"name": m.group(1), "location": "path", "type": "string"})
-    # Express: :name
-    for m in re.finditer(r":([a-zA-Z_]\w*)", route_str):
-        params.append({"name": m.group(1), "location": "path", "type": "string"})
-    # Go/gin: :name or *name (wildcard)
-    for m in re.finditer(r"[/:]\*([a-zA-Z_]\w*)", route_str):
-        params.append({"name": m.group(1), "location": "path", "type": "string"})
+        _add(m.group(1))
+    # Express/Go-gin: /:name  — requires leading / to avoid matching inside <int:name>
+    for m in re.finditer(r"/(?::|\{)([a-zA-Z_]\w*)(?:\})?", route_str):
+        _add(m.group(1))
+    # Go wildcard: /*name
+    for m in re.finditer(r"/\*([a-zA-Z_]\w*)", route_str):
+        _add(m.group(1))
+
     return params
 
 
@@ -125,13 +248,16 @@ class _FlaskExtractor:
                     methods = ["GET"]
                 auth = _detect_auth_near(lines, i)
                 handler = None
-                # look ahead for def
-                for j in range(i + 1, min(i + 4, len(lines))):
+                def_idx = None
+                for j in range(i + 1, min(i + 6, len(lines))):
                     dm = self._DEF.match(lines[j].strip())
                     if dm:
                         handler = dm.group(1)
+                        def_idx = j
                         break
                 params = _path_params(route)
+                if def_idx is not None:
+                    params = params + _scan_handler_params(lines, def_idx + 1)
                 for method in methods:
                     results.append(_make_endpoint(route, method, rel_path, i + 1, handler, list(params), auth))
                 i += 1
@@ -142,12 +268,17 @@ class _FlaskExtractor:
                 method, route = m.group(1).upper(), m.group(2)
                 auth = _detect_auth_near(lines, i)
                 handler = None
-                for j in range(i + 1, min(i + 4, len(lines))):
+                def_idx = None
+                for j in range(i + 1, min(i + 6, len(lines))):
                     dm = self._DEF.match(lines[j].strip())
                     if dm:
                         handler = dm.group(1)
+                        def_idx = j
                         break
-                results.append(_make_endpoint(route, method, rel_path, i + 1, handler, _path_params(route), auth))
+                params = _path_params(route)
+                if def_idx is not None:
+                    params = params + _scan_handler_params(lines, def_idx + 1)
+                results.append(_make_endpoint(route, method, rel_path, i + 1, handler, params, auth))
             i += 1
         return results
 
@@ -190,12 +321,16 @@ class _FastApiExtractor:
             method, route = m.group(1).upper(), m.group(2)
             auth = _detect_auth_near(lines, i)
             handler = None
-            for j in range(i + 1, min(i + 4, len(lines))):
+            def_idx = None
+            for j in range(i + 1, min(i + 6, len(lines))):
                 dm = self._DEF.match(lines[j].strip())
                 if dm:
                     handler = dm.group(1)
+                    def_idx = j
                     break
             params = _path_params(route)
+            if def_idx is not None:
+                params = params + _scan_handler_params(lines, def_idx + 1)
             results.append(_make_endpoint(route, method, rel_path, i + 1, handler, params, auth))
         return results
 
@@ -219,12 +354,14 @@ class _ExpressExtractor:
                 method = "ANY" if m.group(1).lower() == "all" else m.group(1).upper()
                 route = m.group(2)
                 auth = _detect_auth_near(lines, i)
-                results.append(_make_endpoint(route, method, rel_path, i + 1, None, _path_params(route), auth))
+                params = _path_params(route) + _scan_handler_params(lines, i + 1)
+                results.append(_make_endpoint(route, method, rel_path, i + 1, None, params, auth))
                 continue
             m = self._CHAIN.search(line)
             if m:
                 route, method = m.group(1), m.group(2).upper()
-                results.append(_make_endpoint(route, method, rel_path, i + 1, None, _path_params(route), None))
+                params = _path_params(route) + _scan_handler_params(lines, i + 1)
+                results.append(_make_endpoint(route, method, rel_path, i + 1, None, params, None))
         return results
 
 
