@@ -436,15 +436,15 @@ def _wait_for_service(url: str, timeout: int = 20) -> bool:
 def _run_precommands(service_path: str) -> None:
     """Chiede comandi da eseguire prima dell'avvio del servizio."""
     section("Comandi pre-avvio")
-    print(f"  {_C.DIM}Lascia vuoto per saltare{_C.RESET}")
+    step("$ ls -la")
+    run_interactive("ls -la --color=always", shell=True, cwd=service_path)
+    print(f"  {_C.DIM}Inserisci comandi (lascia vuoto o digita 'n'/'no' per terminare){_C.RESET}")
     while True:
         cmd = _ask("Comando").strip()
-        if not cmd:
+        if not cmd or cmd.lower() in ("n", "no"):
             break
         step(f"$ {cmd}")
         run_interactive(cmd, shell=True, cwd=service_path)
-        if not _ask_yn("Altro comando?", "n"):
-            break
 
 
 def _start_target_service(engine: str, service_path: str, settings: dict) -> "str | None":
