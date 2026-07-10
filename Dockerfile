@@ -117,3 +117,6 @@ WORKDIR /app
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 ENTRYPOINT ["/docker-entrypoint.sh"]
+# ── Smuggler ─────────────────────────────────────────────────────────────────
+RUN git clone --depth 1 https://github.com/defparam/smuggler.git /opt/smuggler \
+ && ln -sf /opt/smuggler/smuggler.py /usr/local/bin/smuggler

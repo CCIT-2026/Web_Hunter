@@ -86,6 +86,7 @@ MODULE_REGISTRY: dict[str, str] = {
 
     # --- gated: proxy ---
     "proxy_config": "modules.lang_specific.proxy_config_runner",
+    "smuggler":     "modules.lang_specific.smuggler_runner",
 
     # --- gated: upload ---
     "slipit":   "modules.upload.slipit_runner",

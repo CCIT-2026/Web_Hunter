@@ -56,6 +56,7 @@ TRIGGERS = {
     "nodejsscan": lambda s: s.get("language") == "javascript",
     "grpcurl":    lambda s: s.get("has_grpc", False),
     "proxy_config": lambda s: s.get("has_proxy_configs", False),
+    "smuggler":   lambda s: s.get("has_proxy_configs", False),
 
     # --- upload & file ---
     # slipit: qualsiasi upload. exiftool: upload di file eseguibili (accepts_executable).
