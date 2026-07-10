@@ -122,8 +122,10 @@ def _type_label(raw_type: str) -> str:
 
 def generate(service_name: str, report_dir: str) -> Path:
     report_dir = Path(report_dir)
-    out = report_dir / "report.md"
+    json_dir = report_dir / "json_reports"
+    out = report_dir / "extended_report.md"
 
+    # Contract files rimangono in root; report JSON dei moduli in json_reports/
     stack = _load_json(report_dir / "detected_stack.json") or {}
     endpoints = _load_json(report_dir / "endpoints_map.json") or []
 
@@ -167,7 +169,7 @@ def generate(service_name: str, report_dir: str) -> Path:
     for module_name, section_title in _SECTION_ORDER:
         if section_title is None:
             continue
-        report = _load_json(report_dir / f"{module_name}.json")
+        report = _load_json(json_dir / f"{module_name}.json")
         if report is None:
             continue
         status = report.get("status", "unknown")

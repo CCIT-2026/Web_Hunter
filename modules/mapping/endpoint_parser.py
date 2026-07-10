@@ -554,8 +554,9 @@ def run(service_root: str, service_name: str, report_dir: str, settings: dict | 
             for ep in endpoints
         ],
     }
-    rpath = Path(report_dir) / "mapping.json"
-    rpath.write_text(json.dumps(report, indent=2))
+    _jdir = Path(report_dir) / "json_reports"
+    _jdir.mkdir(parents=True, exist_ok=True)
+    (_jdir / "mapping.json").write_text(json.dumps(report, indent=2))
     elapsed = time.monotonic() - t0
     logger.info("mapping done in %.1fs: %s endpoints", elapsed, len(endpoints))
     return report

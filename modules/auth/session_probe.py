@@ -24,6 +24,11 @@ import urllib.error
 from pathlib import Path
 
 from modules.base_runner import BaseRunner, make_run_fn
+from orchestrator.colors import step as _step_raw, ok as _ok_raw, warn as _warn_raw
+
+def _step(msg: str): _step_raw(f"[session_probe] {msg}")
+def _ok(msg: str):   _ok_raw(f"[session_probe] {msg}")
+def _warn(msg: str): _warn_raw(f"[session_probe] {msg}")
 
 # ---------------------------------------------------------------------------
 # Credential field families
@@ -63,6 +68,7 @@ class SessionProbeRunner(BaseRunner):
     def execute(self):
         test_user = self.settings.get("test_user")
         if not test_user:
+            _warn("test_user non configurato in settings.json — salto")
             return "skipped", "skip: test_user non configurato in settings.json"
 
         target_base = (self.settings.get("target_url") or "http://localhost").rstrip("/")
@@ -71,26 +77,40 @@ class SessionProbeRunner(BaseRunner):
         register_ep = self._find_endpoint(_REGISTER_KEYWORDS)
 
         if not login_ep:
+            _warn("nessun endpoint di login trovato — salto")
             return "skipped", "skip: nessun endpoint di login trovato"
 
+        _step(f"login → {login_ep['path']}")
+
         state = self._load_state()
+        already_registered = state.get("registered", False)
 
         # Tenta login diretto
         ok, cookie, auth_header = self._do_login(target_base, login_ep, test_user)
         if ok:
-            self._save_state(state, cookie, auth_header, registered=state.get("registered", False), logged_in=True)
+            if already_registered:
+                _ok("già registrato — login OK")
+            else:
+                _ok("login OK (credenziali accettate senza registrazione)")
+            self._save_state(state, cookie, auth_header, registered=already_registered, logged_in=True)
             return "completed", None
 
         # Login fallito → registra (o ri-registra dopo reset servizio)
         if register_ep:
+            if already_registered:
+                _warn("login fallito (service reset?) — ri-registro...")
+            else:
+                _step(f"login fallito — registro nuovo utente → {register_ep['path']}")
             self._do_register(target_base, register_ep, test_user)
             ok, cookie, auth_header = self._do_login(target_base, login_ep, test_user)
             if ok:
+                _ok("registrato e loggato con successo")
                 self._save_state(state, cookie, auth_header, registered=True, logged_in=True)
                 return "completed", None
 
-        # Tutto fallito: salva stato e continua senza sessione
-        self._save_state(state, None, None, registered=state.get("registered", False), logged_in=False)
+        # Tutto fallito
+        _warn("autenticazione fallita — i runner procedono senza sessione")
+        self._save_state(state, None, None, registered=already_registered, logged_in=False)
         return "completed", "warn: autenticazione fallita — i runner procedono senza sessione"
 
     # ------------------------------------------------------------------

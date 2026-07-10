@@ -19,13 +19,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from orchestrator.core import run_pipeline
+from orchestrator import colors as _col
 
 
 def _setup_logging(verbose: bool, debug: bool):
     level = logging.DEBUG if debug else (logging.INFO if verbose else logging.WARNING)
     logging.basicConfig(
         level=level,
-        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        format=f"{_col.DIM}%(asctime)s{_col.R}  %(levelname)-8s  %(name)s  %(message)s",
         datefmt="%H:%M:%S",
     )
 
@@ -50,6 +51,9 @@ def main():
         cfg_path = Path(__file__).parent.parent / "settings.json"
         settings = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
 
+    _col.header(f"Analisi  {args.service_name}")
+    _col.step(f"report dir  →  {args.report_dir}")
+
     results = run_pipeline(
         service_root=args.service_root,
         service_name=args.service_name,
@@ -59,14 +63,19 @@ def main():
         verbose=args.verbose,
     )
 
-    # Print summary to stdout
     skipped = [k for k, v in results.items() if v == "skipped"]
-    errors = [k for k, v in results.items() if isinstance(v, Exception)]
-    done = [k for k, v in results.items() if isinstance(v, dict)]
-    print(f"\n[summary] done={len(done)} skipped={len(skipped)} errors={len(errors)}")
+    errors   = [k for k, v in results.items() if isinstance(v, Exception)]
+    done     = [k for k, v in results.items() if isinstance(v, dict)]
+
+    _col.header("Riepilogo")
+    total_findings = sum(
+        len(v.get("findings", [])) for v in results.values() if isinstance(v, dict)
+    )
+    _col.ok(f"Completati: {len(done)}   Saltati: {len(skipped)}   Errori: {len(errors)}")
+    _col.ok(f"Finding totali: {total_findings}")
     if errors:
-        print(f"[errors]  {errors}")
-    print(f"[report]  {args.report_dir}/report.md")
+        _col.warn(f"Moduli in errore: {', '.join(errors)}")
+    _col.ok(f"Report  →  {args.report_dir}/extended_report.md")
 
 
 if __name__ == "__main__":

@@ -7,11 +7,22 @@ Non gated su has_sql_queries (stesso motivo di sqlmap_runner).
 
 Solo detection, non estrazione dati (--dbs/--dump-all esclusi — CTF whitebox).
 Output: reports/<service>/ghauri.json
+
+NOTE su output di ghauri: tutto l'output diagnostico ([INFO]/[WARNING]/[CRITICAL])
+va su STDERR; STDOUT contiene solo il banner e i prompt interattivi.
+Il parser deve quindi ispezionare stderr.
 """
 
+import logging
 import re
 
 from modules.base_runner import BaseRunner, make_run_fn
+
+logger = logging.getLogger(__name__)
+
+# Emetti finding medium-confidence se ghauri vede almeno N segnali "appears to be
+# injectable" per un parametro ma li scarta tutti come false positive.
+_FALSE_POS_THRESHOLD = 3
 
 _TARGET_URL = "http://localhost"
 
@@ -61,32 +72,108 @@ class GhauriRunner(BaseRunner):
         return args
 
     def _test_endpoint(self, url: str, ep: dict):
+        import json as _json
+
         cmd = [
             "ghauri", "-u", url,
             "--batch", "--level=1",
             "--timeout", str(self.timeout),
             "--ignore-code=401,403",
         ] + self._load_auth_args()
-        if ep["method"] == "POST" and ep.get("params"):
-            data = "&".join(f"{p['name']}=TEST" for p in ep["params"] if p["location"] == "body")
-            if data:
-                cmd += ["--data", data]
+
+        body_params  = [p for p in ep.get("params", []) if p["location"] == "body"]
+        query_params = [p for p in ep.get("params", []) if p["location"] == "query"]
+
+        if ep["method"] in ("POST", "PUT", "PATCH") and body_params:
+            use_json = any(p.get("encoding") == "json" for p in body_params)
+            if use_json:
+                payload = _json.dumps({p["name"]: "GHAURITEST" for p in body_params})
+                cmd += ["--data", payload, "-H", "Content-Type: application/json"]
+            else:
+                cmd += ["--data", "&".join(f"{p['name']}=GHAURITEST" for p in body_params)]
+        elif query_params:
+            qs = "&".join(f"{p['name']}=GHAURITEST" for p in query_params)
+            url = f"{url}?{qs}"
+            cmd[cmd.index("-u") + 1] = url
 
         rc, stdout, stderr = self.sh(cmd, timeout=self.timeout * 3)
+
         if rc == -1:
             return
+        if rc == -2:
+            logger.warning("ghauri: timeout su %s — endpoint saltato", ep["path"])
+            return
+        if rc not in (0, 1):
+            logger.warning("ghauri: RC=%d inatteso su %s", rc, ep["path"])
 
-        # ghauri output: look for "Injectable" / "Parameter" in stdout
-        for line in stdout.splitlines():
-            if "injectable" in line.lower() or "vulnerable" in line.lower():
+        seen: set[str] = set()
+        # Conta segnali "appears to be injectable" per param (possono essere false positive)
+        signals: dict[str, int] = {}
+
+        # Frasi che indicano linee negative/rumore — da saltare nel path high-confidence
+        _NEGATIVE = (
+            "appears to be",    # tentativo (gestito dal contatore signals)
+            "does not seem",    # verdetto negativo per-param
+            "not appear to be", # verdetto negativo finale
+            "might not",        # euristica negativa
+            "all tested",       # riassunto finale negativo
+            "false positive",   # warning false positive
+        )
+
+        # ghauri scrive tutto l'output diagnostico su stderr
+        for line in stderr.splitlines():
+            low = line.lower()
+
+            # Conta segnali injectable (inclusi quelli poi scartati come false positive)
+            m_sig = re.search(
+                r"parameter\s+'([^']+)'.*?appears\s+to\s+be.*?injectable", line, re.I
+            )
+            if m_sig:
+                param = m_sig.group(1).strip()
+                signals[param] = signals.get(param, 0) + 1
+                continue  # non emettere subito: aspetta verdetto finale
+
+            if "injectable" not in low and "vulnerable" not in low:
+                continue
+            if any(p in low for p in _NEGATIVE):
+                continue
+
+            # Deve esserci un parametro esplicito identificato
+            m = re.search(r"parameter\s+'([^']+)'", line, re.I)
+            if not m:
+                continue
+            param = m.group(1).strip()
+            if param in seen:
+                continue
+            seen.add(param)
+            self.add_finding(
+                type_="sqli",
+                file_=ep["file"],
+                line=ep["line"],
+                endpoint=ep["path"],
+                method=ep["method"],
+                confidence="high",
+                detail=f"ghauri: param={param} — {line.strip()[:160]}",
+                param=param,
+            )
+
+        # Finding medium-confidence: molti segnali injectable ma tutti scartati come false positive.
+        # Pattern tipico: server con risposte variabili (es. 401/500) che ingannano il boolean oracle.
+        for param, count in signals.items():
+            if param not in seen and count >= _FALSE_POS_THRESHOLD:
+                seen.add(param)
                 self.add_finding(
                     type_="sqli",
                     file_=ep["file"],
                     line=ep["line"],
                     endpoint=ep["path"],
                     method=ep["method"],
-                    confidence="high",
-                    detail=f"ghauri: {line.strip()[:200]}",
+                    confidence="medium",
+                    detail=(
+                        f"ghauri: param={param} — {count}x segnale injectable scartato come "
+                        f"false positive (risposte server instabili — verificare con sqlmap)"
+                    ),
+                    param=param,
                 )
 
 

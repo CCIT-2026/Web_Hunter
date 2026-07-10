@@ -437,6 +437,8 @@ def run(service_root: str, service_name: str, report_dir: str, settings: dict | 
         "skip_reason": skip_reason,
         "findings": findings,
     }
-    (Path(report_dir) / "stack_detector.json").write_text(json.dumps(report, indent=2))
+    _jdir = Path(report_dir) / "json_reports"
+    _jdir.mkdir(parents=True, exist_ok=True)
+    (_jdir / "stack_detector.json").write_text(json.dumps(report, indent=2))
     logger.info("stack_detector done in %.1fs", time.monotonic() - t0)
     return report

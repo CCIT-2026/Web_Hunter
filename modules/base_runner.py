@@ -66,8 +66,9 @@ class BaseRunner:
             "skip_reason": skip_reason,
             "findings": self._findings if status == "completed" else [],
         }
-        out = self.report_dir / f"{self.MODULE_NAME}.json"
-        out.write_text(json.dumps(report, indent=2))
+        json_dir = self.report_dir / "json_reports"
+        json_dir.mkdir(parents=True, exist_ok=True)
+        (json_dir / f"{self.MODULE_NAME}.json").write_text(json.dumps(report, indent=2))
         logger.info("%s: %s in %.1fs (%d findings)", self.MODULE_NAME, status, time.monotonic() - t0, len(self._findings))
         return report
 

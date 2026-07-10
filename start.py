@@ -92,20 +92,22 @@ class _C:
 
 
 def step(msg: str) -> None:
-    """Passo in corso — sempre visibile."""
-    print(f"{_C.CYAN}{_C.BOLD}→{_C.RESET}  {msg}")
+    print(f"{_C.CYAN}{_C.BOLD}→{_C.RESET}  {msg}", flush=True)
 
 def ok(msg: str) -> None:
-    """Operazione completata — sempre visibile."""
-    print(f"{_C.GREEN}{_C.BOLD}✓{_C.RESET}  {msg}")
+    print(f"{_C.GREEN}{_C.BOLD}✓{_C.RESET}  {msg}", flush=True)
 
 def warn(msg: str) -> None:
-    """Avviso non bloccante — sempre visibile."""
-    print(f"{_C.YELLOW}{_C.BOLD}⚠{_C.RESET}  {msg}")
+    print(f"{_C.YELLOW}{_C.BOLD}⚠{_C.RESET}  {msg}", flush=True)
 
 def err(msg: str) -> None:
-    """Errore — sempre visibile, su stderr."""
-    print(f"{_C.RED}{_C.BOLD}✗{_C.RESET}  {msg}", file=sys.stderr)
+    print(f"{_C.RED}{_C.BOLD}✗{_C.RESET}  {msg}", file=sys.stderr, flush=True)
+
+def section(title: str) -> None:
+    """Intestazione di sezione — separa visivamente i blocchi del flusso."""
+    w = 54
+    bar = "╌" * max(0, w - len(title) - 4)
+    print(f"\n{_C.CYAN}{_C.BOLD}╌╌ {title} {bar}{_C.RESET}", flush=True)
 
 def dbg(**kwargs) -> None:
     """Dump compatto variabili — solo con --debug."""
@@ -283,6 +285,8 @@ def _run_analysis(
         cmd += ["-e", "VERBOSE=1"]
     if debug:
         cmd += ["-e", "DEBUG=1"]
+    if sys.stdout.isatty():
+        cmd += ["-e", "FORCE_COLOR=1"]
 
     cmd += [_IMAGE_NAME]
 
@@ -295,7 +299,7 @@ def _run_analysis(
     )
     step(f"Avvio analisi  {service_name}{'  [' + module + ']' if module else ''}...")
 
-    run_cmd(cmd)
+    run_interactive(cmd)
 
 
 def _clone_reports(engine: str, clone_url: str, report_dir: str, service_name: str):
@@ -427,46 +431,45 @@ def _wait_for_service(url: str, timeout: int = 20) -> bool:
     return False
 
 
+def _run_precommands(service_path: str) -> None:
+    """Chiede comandi da eseguire prima dell'avvio del servizio."""
+    section("Comandi pre-avvio")
+    print(f"  {_C.DIM}Lascia vuoto per saltare{_C.RESET}")
+    while True:
+        cmd = _ask("Comando").strip()
+        if not cmd:
+            break
+        step(f"$ {cmd}")
+        run_interactive(cmd, shell=True, cwd=service_path)
+        if not _ask_yn("Altro comando?", "n"):
+            break
+
+
 def _start_target_service(engine: str, service_path: str, settings: dict) -> "str | None":
     """Avvia interattivamente il servizio target. Ritorna target_url o None se saltato."""
-    root = Path(service_path)
     compose_file = _detect_compose_file(service_path)
 
-    step("File nel servizio:")
-    entries = sorted(
-        (e.name + ("/" if e.is_dir() else "") for e in root.iterdir() if not e.name.startswith(".")),
-        key=lambda x: (not x.endswith("/"), x),
-    )
-    for e in entries:
-        print(f"    {e}")
+    section("Servizio target")
+    if compose_file:
+        ok(f"Trovato: {compose_file.relative_to(Path(service_path))}")
+    else:
+        warn("Nessun docker-compose trovato")
+    print()
+    _show_tree(service_path)
 
     dbg(compose_file=str(compose_file) if compose_file else None, service_path=service_path)
 
     if compose_file:
-        # Loop: chiede conferma finché l'utente non dice sì
-        while True:
-            ans = _ask(f"\nPosso avviare con `{engine} compose up -d`? [s/n/skip]", "s").lower()
-            if ans == "skip":
-                return None
-            if ans in ("s", "si", "sì", "y", "yes"):
-                break
-            # n: chiedi comandi pre-avvio, poi richiedi
-            while True:
-                cmd = _ask("Comando da runnare prima").strip()
-                if cmd:
-                    step(f"$ {cmd}")
-                    run_interactive(cmd, shell=True, cwd=service_path)
-                if _ask("Altro da runnare? [s/n]", "n").lower() not in ("s", "si", "sì", "y", "yes"):
-                    break
+        _run_precommands(service_path)
+        section("Avvio servizio")
+        ans = _ask(f"Avvio con `{engine} compose up -d`?  [s/n/skip]", "s").lower()
+        if ans == "skip":
+            return None
+        if ans not in ("s", "si", "sì", "y", "yes"):
+            warn("Avvio saltato — assicurati che il servizio sia già in ascolto.")
+            return None
     else:
-        warn("Nessun docker-compose trovato.")
-        while True:
-            cmd = _ask("Comando per avviare il servizio").strip()
-            if cmd:
-                step(f"$ {cmd}")
-                run_interactive(cmd, shell=True, cwd=service_path)
-            if _ask("Altro da runnare? [s/n]", "n").lower() not in ("s", "si", "sì", "y", "yes"):
-                break
+        _run_precommands(service_path)
 
     # Rileva host:port
     host, port = "127.0.0.1", _detect_service_port(service_path, compose_file)
@@ -533,26 +536,44 @@ def _start_target_service(engine: str, service_path: str, settings: dict) -> "st
 # ---------------------------------------------------------------------------
 
 def _ask(prompt: str, default: str = "") -> str:
-    val = input(f"{prompt} [{default}]: ").strip()
+    hint = f"  {_C.DIM}[{default}]{_C.RESET}" if default else ""
+    val = input(f"  {_C.CYAN}{_C.BOLD}{prompt}{_C.RESET}{hint}  {_C.BOLD}›{_C.RESET}  ").strip()
     return val or default
+
+def _ask_yn(prompt: str, default: str = "s") -> bool:
+    opts = f"{_C.DIM}[{default}]{_C.RESET}"
+    val = input(f"  {_C.CYAN}{_C.BOLD}{prompt}{_C.RESET}  {opts}  {_C.BOLD}›{_C.RESET}  ").strip().lower()
+    val = val or default.lower()
+    return val in ("s", "si", "sì", "y", "yes")
+
+def _show_tree(service_path: str) -> None:
+    root = Path(service_path)
+    entries = sorted(
+        (e.name + ("/" if e.is_dir() else "") for e in root.iterdir() if not e.name.startswith(".")),
+        key=lambda x: (not x.endswith("/"), x),
+    )
+    for i, e in enumerate(entries):
+        prefix = "└──" if i == len(entries) - 1 else "├──"
+        print(f"  {_C.DIM}{prefix}{_C.RESET}  {e}")
 
 
 def interactive_mode(settings: dict) -> tuple[str, str, str, str | None]:
-    service_path = _ask("Service source path")
+    section("Configurazione servizio")
+    service_path = _ask("Path sorgente")
     if not service_path:
-        err("Service path obbligatorio.")
+        err("Path obbligatorio.")
         sys.exit(1)
     service_path = str(Path(service_path).resolve())
 
-    service_name = _ask("Service name", Path(service_path).name)
-    report_dir = _ask("Report output dir", str(_HERE / "reports" / service_name))
+    service_name = _ask("Nome servizio", Path(service_path).name)
+    report_dir   = _ask("Output report",  str(_HERE / "reports" / service_name))
 
     existing = Path(report_dir) / "detected_stack.json"
     clone_url = None
     if not existing.exists():
-        choice = _ask("New analysis or sync with colleague? (new/sync)", "new")
-        if choice.strip().lower() == "sync":
-            clone_url = _ask("Git URL of colleague's report repo")
+        print()
+        if not _ask_yn("Analisi nuova?  (n = sync con collega)", "s"):
+            clone_url = _ask("Git URL repo report collega")
 
     return service_path, service_name, report_dir, clone_url
 
@@ -625,8 +646,9 @@ def main():
             except Exception:
                 reachable = False
             if not reachable:
-                warn(f"Servizio non raggiungibile su {target_url} — provo ad avviarlo...")
+                warn(f"Servizio non raggiungibile su {target_url}")
                 compose_file = _detect_compose_file(service_path)
+                _run_precommands(service_path)
                 if compose_file:
                     # Estrai host e porta dalla target_url salvata
                     try:
@@ -661,6 +683,7 @@ def main():
         else:
             _start_target_service(engine, service_path, settings)
 
+    section("Build immagine")
     if args.rebuild:
         _clean(engine)
         _build_image(engine, no_cache=True)
@@ -687,7 +710,9 @@ def main():
         dev=args.dev,
     )
 
-    ok(f"Report: {report_dir}/report.md")
+    section("Completato")
+    ok(f"Report  →  {report_dir}/extended_report.md")
+    ok(f"JSON    →  {report_dir}/json_reports/")
 
 
 if __name__ == "__main__":

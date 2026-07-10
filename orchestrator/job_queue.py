@@ -121,13 +121,24 @@ class JobQueue:
             if group_lock:
                 group_lock.acquire()
             try:
-                logger.info("[queue] START  %s", name)
+                from orchestrator.colors import B, R, DIM, CY, GR, YE, RE
+                print(f"{CY}{B}→{R}  {name:<22} avvio...", flush=True)
                 t0 = time.monotonic()
                 result = fn(*args, **kwargs)
                 elapsed = time.monotonic() - t0
-                logger.info("[queue] DONE   %s  (%.1fs)", name, elapsed)
+                n = len(result.get("findings", [])) if isinstance(result, dict) else 0
+                status = result.get("status", "?") if isinstance(result, dict) else "?"
+                findings_tag = f"  {B}[{n} finding{'s' if n != 1 else ''}]{R}" if n else ""
+                if status == "skipped":
+                    print(f"  {DIM}↷  {name:<22} saltato{R}", flush=True)
+                elif status == "error":
+                    reason = result.get("skip_reason", "") if isinstance(result, dict) else ""
+                    print(f"  {RE}{B}✗{R}  {name:<22} errore  ({elapsed:.1f}s)  {DIM}{reason}{R}", flush=True)
+                else:
+                    print(f"  {GR}{B}✓{R}  {name:<22} {elapsed:.1f}s{findings_tag}", flush=True)
             except Exception as exc:
                 result = exc
+                print(f"  {RE}{B}✗{R}  {name:<22} CRASH: {exc}", flush=True)
                 logger.exception("[queue] ERROR  %s: %s", name, exc)
             finally:
                 if group_lock:

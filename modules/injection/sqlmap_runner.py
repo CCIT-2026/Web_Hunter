@@ -98,12 +98,6 @@ class SqlmapRunner(BaseRunner):
 
         rc, stdout, stderr = self.sh(cmd, timeout=self.timeout * 4)
 
-        # DEBUG DUMP — rimuovere dopo diagnosi
-        _slug = ep["path"].replace("/", "_").strip("_") or "root"
-        (self.report_dir / f"_sqlmap_debug_{_slug}.txt").write_text(
-            f"CMD: {' '.join(cmd)}\nRC: {rc}\n\n--- STDOUT ---\n{stdout}\n\n--- STDERR ---\n{stderr}"
-        )
-
         if rc == -1:
             return
 

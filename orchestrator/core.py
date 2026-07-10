@@ -32,6 +32,7 @@ from typing import Any
 
 from orchestrator.trigger_rules import ALWAYS_RUN, UNGATED_DISCOVERY, modules_to_run, skipped_modules
 from orchestrator.job_queue import JobQueue, DEFAULT_MUTEX_GROUPS
+from orchestrator import colors as _col
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class Orchestrator:
         t0 = time.monotonic()
 
         # Phase 1 — bootstrap (sequenziale, non entra in JobQueue)
-        logger.info("=== Phase 1: bootstrap (mapping + stack_detector) ===")
+        _col.header("Phase 1 — Mapping & Stack Detection")
         self._run_bootstrap()
 
         # Load contracts
@@ -157,20 +158,18 @@ class Orchestrator:
         endpoints = self._load_json("endpoints_map.json")
 
         if self.single_module:
-            # In single-module mode, esegui session_probe prima dei moduli injection
-            # così auth_state.json è disponibile anche con --module=sqlmap
             _NEEDS_AUTH = {"sqlmap", "ghauri", "nosqli", "sstimap", "commix"}
             if self.single_module in _NEEDS_AUTH:
-                logger.info("=== Phase 1.5: session_probe (pre-injection auth) ===")
+                _col.header("Phase 1.5 — Autenticazione")
                 self._run_phase15(stack, endpoints)
             return self._run_single(self.single_module, stack, endpoints)
 
         # Phase 1.5 — session probe (sequenziale, prima dei moduli injection)
-        logger.info("=== Phase 1.5: session_probe ===")
+        _col.header("Phase 1.5 — Autenticazione")
         self._run_phase15(stack, endpoints)
 
         # Phase 2 — run all triggered modules in parallel
-        logger.info("=== Phase 2: parallel pipeline ===")
+        _col.header("Phase 2 — Analisi Parallela")
         to_run   = [m for m in modules_to_run(stack) if m not in ("mapping", "stack_detector")]
         skipped  = skipped_modules(stack)
 
@@ -285,8 +284,9 @@ class Orchestrator:
             "skip_reason": reason,
             "findings": [],
         }
-        p = Path(self.report_dir) / f"{module_name}.json"
-        p.write_text(json.dumps(report, indent=2))
+        json_dir = Path(self.report_dir) / "json_reports"
+        json_dir.mkdir(parents=True, exist_ok=True)
+        (json_dir / f"{module_name}.json").write_text(json.dumps(report, indent=2))
 
     def _log_skip_plan(self, to_run: list[str], skipped: dict[str, str]):
         logger.info("Modules to run  (%d): %s", len(to_run), ", ".join(to_run))
