@@ -86,11 +86,11 @@ def _detect_auth_near(lines: list[str], center: int, window: int = 6):
 # Body / query param patterns — direct access
 _DIRECT_BODY: list[re.Pattern] = [
     # Flask: request.form / request.values
-    re.compile(r"""request\s*\.\s*(?:form|values)\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    re.compile(r"""request\s*\.\s*(?:form|values)\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"](?:\s*,\s*[^)]*)?\))"""),
     # Flask: request.json / request.get_json()
-    re.compile(r"""request\s*\.\s*(?:json|get_json\s*\([^)]*\))\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    re.compile(r"""request\s*\.\s*(?:json|get_json\s*\([^)]*\))\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"](?:\s*,\s*[^)]*)?\))"""),
     # Django: request.POST
-    re.compile(r"""request\s*\.\s*POST\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    re.compile(r"""request\s*\.\s*POST\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"](?:\s*,\s*[^)]*)?\))"""),
     # Express: req.body
     re.compile(r"""req\s*\.\s*body\s*(?:\[['"`]([^'"`]+)['"`]\]|\.([a-zA-Z_]\w*))"""),
     # PHP: $_POST / $_REQUEST
@@ -98,9 +98,9 @@ _DIRECT_BODY: list[re.Pattern] = [
 ]
 _DIRECT_QUERY: list[re.Pattern] = [
     # Flask: request.args
-    re.compile(r"""request\s*\.\s*args\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    re.compile(r"""request\s*\.\s*args\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"](?:\s*,\s*[^)]*)?\))"""),
     # Django: request.GET
-    re.compile(r"""request\s*\.\s*GET\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""),
+    re.compile(r"""request\s*\.\s*GET\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"](?:\s*,\s*[^)]*)?\))"""),
     # Express: req.query
     re.compile(r"""req\s*\.\s*query\s*(?:\[['"`]([^'"`]+)['"`]\]|\.([a-zA-Z_]\w*))"""),
     # PHP: $_GET
@@ -156,12 +156,11 @@ def _scan_handler_params(lines: list[str], def_idx: int, max_lines: int = 50) ->
             else:
                 aliases[m.group(1)] = ("body", "form")
 
-    # Compile alias patterns once
     alias_pats = {
         varname: (
             re.compile(
                 r"\b" + re.escape(varname)
-                + r"""\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"]\))"""
+                + r"""\s*(?:\[['"]([^'"]+)['"]\]|\.get\s*\(\s*['"]([^'"]+)['"](?:\s*,\s*[^)]*)?\))"""
             ),
             loc_enc,
         )

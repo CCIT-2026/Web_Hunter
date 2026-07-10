@@ -55,6 +55,7 @@ TRIGGERS = {
     "fickling":   lambda s: s.get("language") == "python" and s.get("has_eval_on_input", False),
     "nodejsscan": lambda s: s.get("language") == "javascript",
     "grpcurl":    lambda s: s.get("has_grpc", False),
+    "proxy_config": lambda s: s.get("has_proxy_configs", False),
 
     # --- upload & file ---
     # slipit: qualsiasi upload. exiftool: upload di file eseguibili (accepts_executable).
@@ -71,6 +72,7 @@ TRIGGERS = {
     # rendendo i due tool ciechi. Il gating fine (priorità endpoint SQL-adjacent) resta nel runner.
     "sqlmap":     lambda s: True,
     "ghauri":     lambda s: True,
+    "dalfox":     lambda s: True,
     "nosqli":     lambda s: s.get("has_nosql", False) and not s.get("has_sql_queries", False),
 
     # --- injection: template / command (complemento tool-based, guidati dal mapping) ---

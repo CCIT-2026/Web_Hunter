@@ -69,7 +69,8 @@ RUN git clone --depth 1 https://github.com/vladko312/SSTImap.git /opt/SSTImap \
 RUN go install github.com/BishopFox/jsluice/cmd/jsluice@latest \
  && go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest \
  && go install github.com/zricethezav/gitleaks/v8@latest \
- && go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+ && go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
+ && go install github.com/hahwul/dalfox/v2@latest
 
 # ── trufflehog v3 (usa replace directives in go.mod → go install non funziona)
 # Soluzione: clona e builda come main module, dove i replace sono validi

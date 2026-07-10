@@ -142,6 +142,7 @@ class StackDetector:
             "path_traversal_locations": [],
             "has_ldap_query": False,
             "ldap_locations": [],
+            "has_proxy_configs": False,
         }
         self._ext_count: dict[str, int] = {}
         self._fw_hits: dict[str, int] = {}
@@ -213,7 +214,7 @@ class StackDetector:
         # Binary / non-text skip
         if ext not in {".py", ".js", ".ts", ".mjs", ".php", ".go", ".rb", ".java",
                        ".cs", ".rs", ".jsx", ".tsx", ".yml", ".yaml", ".env",
-                       ".cfg", ".ini", ".toml", ".txt", ".json", ".xml", ".twig", ".html"}:
+                       ".cfg", ".ini", ".toml", ".txt", ".json", ".xml", ".twig", ".html", ".conf"}:
             return
 
         try:
@@ -235,10 +236,17 @@ class StackDetector:
         self._detect_path_traversal(lines, rel, ext)
         self._detect_ldap(lines, rel)
         self._detect_db_presence(src, rel)
+        self._detect_proxy_config(fpath, rel)
 
     # -----------------------------------------------------------------------
     # Per-category detectors
     # -----------------------------------------------------------------------
+
+    def _detect_proxy_config(self, fpath: Path, rel: str):
+        # Cerchiamo file come nginx.conf, default.conf, apache2.conf, httpd.conf, etc.
+        name_lower = fpath.name.lower()
+        if name_lower in ("nginx.conf", "apache2.conf", "httpd.conf", ".htaccess") or name_lower.endswith(".conf"):
+            self._stack["has_proxy_configs"] = True
 
     def _detect_framework_hints(self, src: str, rel: str):
         for name, pat in [

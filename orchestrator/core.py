@@ -63,6 +63,7 @@ MODULE_REGISTRY: dict[str, str] = {
     "sstimap":  "modules.injection.sstimap_runner",
     "commix":   "modules.injection.commix_runner",
     "nosqli":   "modules.injection.nosqli_runner",
+    "dalfox":   "modules.injection.dalfox_runner",
 
     # --- auth probe (Phase 1.5 — prima dei moduli di injection) ---
     "session_probe": "modules.auth.session_probe",
@@ -82,6 +83,9 @@ MODULE_REGISTRY: dict[str, str] = {
 
     # --- gated: grpc ---
     "grpcurl": "modules.grpc.grpcurl_runner",
+
+    # --- gated: proxy ---
+    "proxy_config": "modules.lang_specific.proxy_config_runner",
 
     # --- gated: upload ---
     "slipit":   "modules.upload.slipit_runner",
