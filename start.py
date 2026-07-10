@@ -304,19 +304,6 @@ def _run_analysis(
     run_interactive(cmd)
 
 
-def _clone_reports(engine: str, clone_url: str, report_dir: str, service_name: str):
-    """Clone a colleague's report repo instead of starting fresh."""
-    from modules.sync import git_sync
-    step(f"Clone report da  {clone_url}")
-    clone_ok = git_sync.clone(clone_url, report_dir)
-    if not clone_ok:
-        err("Clone fallito — controlla URL e connettività VPN.")
-        sys.exit(1)
-    ok(f"Clone OK → {report_dir}")
-    _, msg = git_sync.pull(report_dir)
-    ok(f"Pull: {msg}")
-
-
 # ---------------------------------------------------------------------------
 # Target service launcher
 # ---------------------------------------------------------------------------
@@ -559,94 +546,6 @@ def _show_tree(service_path: str) -> None:
         print(f"  {_C.DIM}{prefix}{_C.RESET}  {e}")
 
 
-def _detect_share_ip() -> "tuple[str, str]":
-    """
-    Ritorna (ip, label) scegliendo nell'ordine:
-      1. Interfaccia player* o team*  — VPN CTF tipica
-      2. Interfaccia tailscale* o ts* — Tailscale
-      3. IP di uscita verso 1.1.1.1   — fallback generico
-    """
-    import re as _re
-
-    _PATTERNS = [
-        (r"^(player|team)",    "VPN CTF"),
-        (r"^(tailscale|ts\d)", "Tailscale"),
-    ]
-
-    try:
-        r = subprocess.run(["ip", "-4", "addr", "show"],
-                           capture_output=True, text=True)
-        # ogni blocco inizia con "N: iface: ..."
-        blocks = _re.split(r"\n(?=\d+:)", r.stdout)
-        for pat, label in _PATTERNS:
-            for block in blocks:
-                nm = _re.match(r"\d+:\s+(\S+?)[@:\s]", block)
-                if nm and _re.match(pat, nm.group(1)):
-                    m = _re.search(r"inet (\d+\.\d+\.\d+\.\d+)", block)
-                    if m:
-                        return m.group(1), f"{label} ({nm.group(1)})"
-    except Exception:
-        pass
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as _s:
-            _s.connect(("1.1.1.1", 80))
-            return _s.getsockname()[0], "IP locale"
-    except Exception:
-        return "127.0.0.1", "loopback"
-
-
-def _open_git_daemon_port(port: int = 9418) -> None:
-    """
-    Rileva il firewall attivo (firewalld o ufw) e propone di aprire la porta
-    per git daemon. Chiede consenso prima di eseguire qualsiasi comando sudo.
-    Idempotente: aprire una porta già aperta è innocuo su entrambi i firewall.
-    """
-    def _firewalld_active() -> bool:
-        r = subprocess.run(
-            ["systemctl", "is-active", "firewalld"],
-            capture_output=True, text=True,
-        )
-        return r.returncode == 0 and r.stdout.strip() == "active"
-
-    def _ufw_active() -> bool:
-        if not shutil.which("ufw"):
-            return False
-        r = subprocess.run(["sudo", "-n", "ufw", "status"], capture_output=True, text=True)
-        return "active" in r.stdout.lower()
-
-    if _firewalld_active():
-        warn(f"firewalld attivo — porta {port}/tcp potrebbe essere bloccata")
-        if _ask_yn(f"Apro la porta {port}/tcp su firewalld per i colleghi?", "s"):
-            r = subprocess.run(
-                ["sudo", "firewall-cmd", f"--add-port={port}/tcp", "--permanent"],
-                capture_output=True, text=True,
-            )
-            if r.returncode == 0:
-                subprocess.run(["sudo", "firewall-cmd", "--reload"],
-                               capture_output=True, text=True)
-                ok(f"Porta {port}/tcp aperta su firewalld")
-            else:
-                err(f"firewall-cmd fallito: {r.stderr.strip()}")
-        return
-
-    if _ufw_active():
-        warn(f"ufw attivo — porta {port}/tcp potrebbe essere bloccata")
-        if _ask_yn(f"Apro la porta {port}/tcp su ufw per i colleghi?", "s"):
-            r = subprocess.run(
-                ["sudo", "ufw", "allow", f"{port}/tcp"],
-                capture_output=True, text=True,
-            )
-            if r.returncode == 0:
-                ok(f"Porta {port}/tcp aperta su ufw")
-            else:
-                err(f"ufw fallito: {r.stderr.strip()}")
-        return
-
-    # Nessun firewall rilevato: la porta è probabilmente già raggiungibile
-    ok(f"Nessun firewall rilevato — porta {port}/tcp accessibile")
-
-
 def _pick_path_fzf(prompt: str) -> "str | None":
     """Seleziona una directory con fzf. Ritorna None se fzf non è disponibile o l'utente annulla."""
     if not shutil.which("fzf"):
@@ -699,22 +598,7 @@ def _enable_path_autocomplete() -> None:
         pass
 
 
-def interactive_mode(settings: dict) -> tuple[str, str, str, str | None]:
-    # ── Prima domanda: nuova analisi o sync? ───────────────────────────────
-    section("Modalità")
-    is_new = _ask_yn("Nuova analisi?  (n = pull report da collega)", "s")
-
-    if not is_new:
-        section("Sync con collega")
-        service_name = _ask("Nome servizio")
-        if not service_name:
-            err("Nome servizio obbligatorio.")
-            sys.exit(1)
-        report_dir = _ask("Output report", str(_HERE / "reports" / service_name))
-        clone_url  = _ask("Git URL repo collega  (es. git://100.x.x.x/Service)")
-        return "", service_name, report_dir, clone_url
-
-    # ── Nuova analisi: scegli il path ──────────────────────────────────────
+def interactive_mode(settings: dict) -> tuple[str, str, str]:
     section("Configurazione servizio")
     chosen = _pick_path_fzf("Path sorgente servizio")
     if chosen:
@@ -732,7 +616,7 @@ def interactive_mode(settings: dict) -> tuple[str, str, str, str | None]:
 
     service_name = _ask("Nome servizio", Path(service_path).name)
     report_dir   = _ask("Output report",  str(_HERE / "reports" / service_name))
-    return service_path, service_name, report_dir, None
+    return service_path, service_name, report_dir
 
 
 # ---------------------------------------------------------------------------
@@ -743,7 +627,6 @@ def main():
     parser = argparse.ArgumentParser(description="CTF A/D Recon Suite")
     parser.add_argument("--path",      help="Path al sorgente del servizio")
     parser.add_argument("--module",    help="Esegui solo questo modulo (es. --module=sqlmap)")
-    parser.add_argument("--clone",     metavar="GIT_URL", help="Clona il repo report di un collega")
     parser.add_argument("--clean",     action="store_true", help="Rimuovi container recon e pruna il sistema")
     parser.add_argument("--rebuild",   action="store_true", help="Clean + rebuild immagine da zero")
     parser.add_argument("--dev",       action="store_true", help="Monta modules/ locale (test senza rebuild)")
@@ -766,12 +649,9 @@ def main():
         service_path = str(Path(args.path).resolve())
         service_name = Path(service_path).name
         report_dir = str(_HERE / "reports" / service_name)
-        clone_url = args.clone
     else:
         # Interactive
-        service_path, service_name, report_dir, clone_url = interactive_mode(settings)
-        if args.clone:
-            clone_url = args.clone
+        service_path, service_name, report_dir = interactive_mode(settings)
 
     dbg(
         engine=engine,
@@ -786,10 +666,6 @@ def main():
     )
 
     Path(report_dir).mkdir(parents=True, exist_ok=True)
-
-    if clone_url:
-        _clone_reports(engine, clone_url, report_dir, service_name)
-        return
 
     # Avvio del servizio target
     if not args.no_target:
@@ -847,29 +723,6 @@ def main():
     else:
         _build_image(engine)
 
-    # Init git repo + avvia git daemon per la condivisione su Tailscale/LAN (git:// — no SSH)
-    sys.path.insert(0, str(_HERE))
-    try:
-        from modules.sync import git_sync
-        reports_base = str(Path(report_dir).parent)
-        git_sync.init(report_dir)
-
-        _my_ip, _ip_label = _detect_share_ip()
-        _open_git_daemon_port()
-        daemon_pid = git_sync.start_daemon(reports_base)
-        ok(f"Repo report pronto  →  {report_dir}")
-        if daemon_pid:
-            _pull_url = f"git://{_my_ip}/{service_name}"
-            ok(f"git daemon PID {daemon_pid}  —  porta 9418  —  {_C.DIM}{_ip_label}{_C.RESET}")
-            step(f"Colleghi clonano  →  {_C.BOLD}git clone {_pull_url}{_C.RESET}")
-            step(f"Colleghi pullano  →  {_C.BOLD}git pull{_C.RESET}  {_C.DIM}(dalla loro copia clonata){_C.RESET}")
-        else:
-            _user = os.environ.get("USER", "user")
-            warn(f"git daemon non avviato — i colleghi usano SSH ({_ip_label}):")
-            step(f"  {_C.BOLD}{_user}@{_my_ip}:{report_dir}{_C.RESET}")
-    except ImportError:
-        pass  # git_sync optional
-
     _run_analysis(
         engine=engine,
         service_path=service_path,
@@ -882,17 +735,10 @@ def main():
         dev=args.dev,
     )
 
-    # Commit findings — i colleghi fanno git pull e vedono i risultati
-    try:
-        from modules.sync import git_sync as _gs
-        if _gs.commit(report_dir, f"findings: {service_name}"):
-            ok("Findings committati su git  —  i colleghi possono fare git pull")
-    except Exception:
-        pass
-
     section("Completato")
-    ok(f"Report  →  {report_dir}/extended_report.md")
-    ok(f"JSON    →  {report_dir}/json_reports/")
+    ok(f"Quick report   →  {report_dir}/quick_report.md")
+    ok(f"Report esteso  →  {report_dir}/extended_report.md")
+    ok(f"JSON           →  {report_dir}/json_reports/")
 
 
 if __name__ == "__main__":

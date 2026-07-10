@@ -304,6 +304,18 @@ class Orchestrator:
         except Exception as exc:
             logger.warning("markdown_report generation failed: %s", exc)
 
+        try:
+            from modules.reporting.stats_tracker import generate as gen_stats
+            gen_stats(self.report_dir)
+        except Exception as exc:
+            logger.warning("stats_tracker failed: %s", exc)
+
+        try:
+            from modules.reporting.quick_report import generate as gen_quick
+            gen_quick(self.service_name, self.report_dir)
+        except Exception as exc:
+            logger.warning("quick_report generation failed: %s", exc)
+
 
 # ---------------------------------------------------------------------------
 # Module init (importable as package)

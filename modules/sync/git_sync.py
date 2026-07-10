@@ -24,6 +24,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
 _GIT = ["git"]
 
 
@@ -131,53 +132,6 @@ def pull(report_dir: str) -> tuple[bool, str]:
     )
     logger.error(conflict_msg)
     return False, conflict_msg
-
-
-def start_daemon(reports_base: str, port: int = 9418) -> "int | None":
-    """
-    Avvia git daemon in background su git://<ip>:<port>/<service>.
-    Usa start_new_session=True per sopravvivere alla chiusura di start.py.
-    Idempotente: se il daemon è già in ascolto su quella porta non ne avvia un altro.
-    Ritorna il PID del processo, o None in caso di errore.
-    """
-    import os as _os
-    base = Path(reports_base)
-    pid_file = base / ".git-daemon.pid"
-    log_file = base / ".git-daemon.log"
-
-    # Controlla se c'è già un daemon attivo
-    if pid_file.exists():
-        try:
-            old_pid = int(pid_file.read_text().strip())
-            _os.kill(old_pid, 0)   # lancia OSError se il processo non esiste
-            return old_pid          # già in esecuzione
-        except (OSError, ValueError):
-            pid_file.unlink(missing_ok=True)
-
-    base.mkdir(parents=True, exist_ok=True)
-    try:
-        proc = subprocess.Popen(
-            [
-                "git", "daemon",
-                "--reuseaddr",
-                "--export-all",        # esporta tutti i repo senza bisogno di git-daemon-export-ok
-                f"--port={port}",
-                f"--base-path={base}", # i colleghi clonano con git://ip/<service_name>
-                str(base),
-            ],
-            stdout=open(log_file, "w"),
-            stderr=subprocess.STDOUT,
-            start_new_session=True,    # sopravvive alla chiusura di start.py
-        )
-        pid_file.write_text(str(proc.pid))
-        logger.info("git daemon avviato (PID %d) su git://...:%d/", proc.pid, port)
-        return proc.pid
-    except FileNotFoundError:
-        logger.error("git daemon non trovato — git non installato?")
-        return None
-    except Exception as exc:
-        logger.error("git daemon: %s", exc)
-        return None
 
 
 def add_remote(report_dir: str, url: str, name: str = "origin") -> bool:
