@@ -502,7 +502,8 @@ class EndpointParser:
                         seen.add(key)
                         endpoints.append(ep)
 
-        out = self.report_dir / "endpoints_map.json"
+        out = self.report_dir / "json_reports" / "endpoints_map.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(endpoints, indent=2))
         logger.info("Mapping: %d endpoints → %s", len(endpoints), out)
         return endpoints

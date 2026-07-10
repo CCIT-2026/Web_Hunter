@@ -179,7 +179,8 @@ class StackDetector:
             self._process_file(fpath)
         self._finalize_language()
         self._finalize_framework()
-        out = self.report_dir / "detected_stack.json"
+        out = self.report_dir / "json_reports" / "detected_stack.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(self._stack, indent=2))
         logger.info("StackDetector → %s", out)
         return self._stack

@@ -24,10 +24,12 @@ Usage:
 """
 
 import argparse
+import glob
 import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -557,13 +559,75 @@ def _show_tree(service_path: str) -> None:
         print(f"  {_C.DIM}{prefix}{_C.RESET}  {e}")
 
 
+def _pick_path_fzf(prompt: str) -> "str | None":
+    """Seleziona una directory con fzf. Ritorna None se fzf non è disponibile o l'utente annulla."""
+    if not shutil.which("fzf"):
+        return None
+    try:
+        # find gira in background e alimenta fzf mentre scansiona
+        find = subprocess.Popen(
+            ["find", str(Path.home()), "-maxdepth", "6", "-type", "d",
+             "-not", "-path", "*/\\.*"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+        result = subprocess.run(
+            [
+                "fzf",
+                "--prompt",         f"  {prompt}  ›  ",
+                "--preview",        "ls --color=always {}",
+                "--preview-window", "right:50%:border-left",
+                "--height",         "70%",
+                "--border",         "rounded",
+                "--info",           "inline",
+                "--header",         "INVIO: conferma   ESC/CTRL-C: digita manualmente",
+            ],
+            stdin=find.stdout,
+            capture_output=True, text=True,
+        )
+        find.terminate()
+        chosen = result.stdout.strip()
+        return chosen if result.returncode == 0 and chosen else None
+    except Exception:
+        return None
+
+
+def _enable_path_autocomplete() -> None:
+    """Abilita tab-completion per path filesystem su readline."""
+    try:
+        import readline
+
+        def _completer(text: str, state: int) -> "str | None":
+            pattern = os.path.expanduser(text) + "*"
+            matches = [
+                m + ("/" if os.path.isdir(m) else "")
+                for m in glob.glob(pattern)
+            ]
+            return matches[state] if state < len(matches) else None
+
+        readline.set_completer(_completer)
+        readline.set_completer_delims(" \t\n")
+        readline.parse_and_bind("tab: complete")
+    except ImportError:
+        pass
+
+
 def interactive_mode(settings: dict) -> tuple[str, str, str, str | None]:
     section("Configurazione servizio")
-    service_path = _ask("Path sorgente")
-    if not service_path:
-        err("Path obbligatorio.")
-        sys.exit(1)
-    service_path = str(Path(service_path).resolve())
+
+    # Path: fzf se disponibile, altrimenti input con tab-completion
+    chosen = _pick_path_fzf("Path sorgente servizio")
+    if chosen:
+        ok(f"Selezionato: {chosen}")
+        service_path = str(Path(chosen).resolve())
+    else:
+        if not shutil.which("fzf"):
+            warn("fzf non trovato — usa TAB per l'autocomplete del path")
+        _enable_path_autocomplete()
+        raw = _ask("Path sorgente  (TAB per completare)")
+        if not raw:
+            err("Path obbligatorio.")
+            sys.exit(1)
+        service_path = str(Path(raw).expanduser().resolve())
 
     service_name = _ask("Nome servizio", Path(service_path).name)
     report_dir   = _ask("Output report",  str(_HERE / "reports" / service_name))
