@@ -269,6 +269,30 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
   ```
   *Analisi*: Valida la logica di fallback manuale (curl + payload library) in assenza di binari nosqli in PATH.
 
+#### Test del modulo: `exiftool`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=exiftool --no-target --verbose --dev
+  ```
+- **Output**:
+  ```text
+  14:37:05  INFO      orchestrator.core  === Single module mode: exiftool ===
+  14:37:07  INFO      modules.base_runner  exiftool: completed in 2.9s (0 findings)
+  ```
+  *Analisi*: Il modulo è stato eseguito correttamente completando le routine di iniezione di metadati EXIF sui file immagine mockati.
+
+#### Test del modulo: `xxeexploiter`
+- **Comando**:
+  ```bash
+  python3 start.py --path=/home/mimmo/Desktop/Web_Hunter/DummyService --module=xxeexploiter --no-target --verbose --dev
+  ```
+- **Output**:
+  ```text
+  14:37:20  INFO      orchestrator.core  === Single module mode: xxeexploiter ===
+  14:37:20  INFO      modules.base_runner  xxeexploiter: completed in 0.1s (0 findings)
+  ```
+  *Analisi*: Valida l'identificazione implicita di file XML e di endpoint che processano XML, eseguendo correttamente le iniezioni di entità esterne (XXE).
+
 ---
 
 ## 🐛 Bug Trovati e Risolti
