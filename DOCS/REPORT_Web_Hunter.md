@@ -4,7 +4,7 @@
 > **Immagine**: `ctf-recon-suite:latest`  
 > **Data inizio**: 2026-07-10  
 > **Autore sezione**: Mimmo (testing singoli moduli)  
-> **Collega**: lavora su orchestratore generale e interazione tra moduli
+> **Collega**: lavora su orchestratore generale e interazione tra moduli (incluso sqlmap/ghauri)
 
 ---
 
@@ -22,125 +22,83 @@
 
 ## Ambiente di test
 
-- **Comando base (modulo singolo)**:
-  ```bash
-  python3 start.py --path=/home/mimmo/Desktop/Pwnzer0tt1Shop --module=<MODULO> --no-target --verbose --dev
-  ```
-- **Flag `--dev`**: monta `modules/` e `orchestrator/` locale sull'immagine → usare SEMPRE per applicare fix ai runner senza rebuild.
-- **Flag `--no-target`**: salta il prompt interattivo di avvio del servizio target.
+- **Comando base**: `python3 start.py --path=/home/mimmo/Desktop/Pwnzer0tt1Shop --module=<MOD> --no-target --verbose --dev`
+- **`--dev`**: monta `modules/` e `orchestrator/` locali → usare sempre per applicare fix senza rebuild
+- **`--no-target`**: salta il prompt interattivo del servizio target
 - **Report output**: `Web_Hunter/reports/Pwnzer0tt1Shop/`
 
-### Note setup iniziale
-- `settings.json`: engine = `docker`, `target_url` = `http://127.0.0.1:80` ✅
-- Servizio Pwnzer0tt1Shop: attivo su porta 80 via `docker compose up -d` ✅
-- Immagine `ctf-recon-suite:latest`: buildata ✅
+### Settings correnti
+- `engine`: `docker`
+- `target_url`: `http://127.0.0.1:80`
+- `timeout_seconds`: `60` (alzato da 15 per sqlmap)
 
 ---
 
-## Stack rilevato (Pwnzer0tt1Shop) — da `detected_stack.json`
+## Stack rilevato (Pwnzer0tt1Shop) — `detected_stack.json`
 
-| Flag | Valore | Implicazione |
-|------|--------|--------------|
+| Flag | Valore | Moduli attivati |
+|------|--------|-----------------|
 | language | `python` | — |
 | framework | `flask` | — |
 | has_php | `false` | → phpggc, symfony SKIP |
 | has_symfony_twig | `false` | → symfony SKIP |
 | has_grpc | `false` | → grpcurl SKIP |
 | has_file_upload | `false` | → slipit, exiftool, polyglot SKIP |
-| **has_sql_queries** | **`true`** | → **sqlmap, ghauri attivi** |
-| **has_nosql** | **`true`** | → nosqli attivo (solo se NOT has_sql) |
+| **has_sql_queries** | **`true`** | → sqlmap, ghauri (collega) |
+| **has_nosql** | **`true`** | → nosqli SKIP (ha_sql=true blocca trigger) |
 | uses_jwt | `false` | → jwt_tool SKIP |
 | has_eval_on_input | `false` | → fickling SKIP |
-| **db_present_in_domain** | **`true`** | → **trufflehog, gitleaks attivi** |
+| **db_present_in_domain** | **`true`** | → trufflehog, gitleaks |
 | has_outbound_request_on_input | `false` | → ssrf_generic SKIP |
 | has_graphql_endpoint | `false` | → graphql_generic SKIP |
 | has_xpath_parser | `false` | → xpath_generic SKIP |
 | has_file_path_from_input | `false` | → directory_traversal SKIP |
 | has_ldap_query | `false` | → ldap_generic SKIP |
 
-**12 endpoint trovati** da `mapping`:
-- `GET  /api/articles` — no auth
-- `POST /api/register` — params: username, password, email (body JSON)
-- `POST /api/login` — params: username, password (body JSON)
-- `POST /api/donate` — params: price (body JSON)
-- `POST /api/sell` — params: title, description, price, secret (body JSON)
-- `POST /api/store/<int:article_id>/buy` — path param: article_id
-- `POST /api/logout`
-- (altri 5 — leggere `reports/Pwnzer0tt1Shop/endpoints_map.json` per il dettaglio completo)
+**12 endpoint trovati** — candidati SQLi principali: `POST /api/login` (f-string SQLi confermata a livello sorgente), `POST /api/donate`, `POST /api/sell`
 
 ---
 
-## TODO List — Testing moduli
+## TODO List — Pwnzer0tt1Shop
 
 ### FASE 0 — Setup e Bootstrap
+- ✅ **[SETUP-1]** Build immagine Docker
+- ✅ **[SETUP-2]** Pwnzer0tt1Shop up su porta 80
+- ✅ **[SETUP-3]** `target_url` impostato
+- ✅ **[MODULE-mapping]** 12 endpoint trovati — `endpoints_map.json` OK
+- ✅ **[MODULE-stack_detector]** `detected_stack.json` OK
 
-- ✅ **[SETUP-1]** Build immagine Docker `ctf-recon-suite:latest` — 2026-07-10
-- ✅ **[SETUP-2]** Avvio servizio target Pwnzer0tt1Shop — risponde 200 su porta 80
-- ✅ **[SETUP-3]** `target_url: "http://127.0.0.1:80"` impostato in `settings.json`
-- ✅ **[MODULE-mapping]** `mapping` — **12 endpoint trovati**, `endpoints_map.json` prodotto correttamente
-  - Bug trovato e fixato: `run()` non accettava `**kwargs` (crash in single-module mode)
-  - Fix: aggiunto `**kwargs` a `modules/mapping/endpoint_parser.py:run()` e `orchestrator/stack_detector.py:run()`
-- ✅ **[MODULE-stack_detector]** `stack_detector` — gira nel bootstrap, `detected_stack.json` prodotto (vedi tabella stack sopra)
+### FASE 1 — Discovery
+- ✅ **[MODULE-semgrep]** 9 findings (vedi tabella sotto)
+- ✅ **[MODULE-ripgrep]** 1 finding (vedi tabella sotto)
+- ✅ **[MODULE-jsluice]** 55 findings (URL/endpoint dal frontend TS)
+- ✅ **[MODULE-trufflehog]** 0 findings — nessun segreto trovato
+- ✅ **[MODULE-gitleaks]** 0 findings — nessun segreto in git history
+- ✅ **[MODULE-nuclei]** 10 findings (vedi tabella sotto)
 
----
-
-### FASE 1 — Discovery (statici / basso impatto)
-
-- 🔲 **[MODULE-semgrep]** SAST sul codice sorgente
-- 🔲 **[MODULE-ripgrep]** Grep su pattern pericolosi nel sorgente
-- 🔲 **[MODULE-jsluice]** Estrae URL/segreti da file JS
-- 🔲 **[MODULE-trufflehog]** Cerca segreti/credenziali — ATTESO ATTIVO (`db_present_in_domain=true`)
-- 🔲 **[MODULE-gitleaks]** Cerca segreti nel repo git — ATTESO ATTIVO (`db_present_in_domain=true`)
-- 🔲 **[MODULE-nuclei]** Scanner misconfig — richiede `target_url`
-
----
-
-### FASE 2 — Injection (attivi — servizio target richiesto)
-
-- 🔲 **[MODULE-sqlmap]** ⭐ PROSSIMO DA TESTARE
-  - Trigger soddisfatto: `has_sql_queries=true`
-  - Endpoint candidati: `/api/login`, `/api/register`, `/api/donate`, `/api/sell`
-  - Comando: `python3 start.py --path=... --module=sqlmap --no-target --verbose --dev`
-
-- 🔲 **[MODULE-ghauri]** — trigger soddisfatto: `has_sql_queries=true`
-- 🔲 **[MODULE-sstimap]** — Flask+Jinja2, possibile SSTI
-- 🔲 **[MODULE-commix]** — Command Injection
-- 🔲 **[MODULE-nosqli]** — trigger: `has_nosql=true AND NOT has_sql_queries` → SKIP atteso (entrambi true)
-- 🔲 **[MODULE-ssrf_generic]** — trigger non soddisfatto → SKIP atteso
-- 🔲 **[MODULE-graphql_generic]** — trigger non soddisfatto → SKIP atteso
-- 🔲 **[MODULE-xpath_generic]** — trigger non soddisfatto → SKIP atteso
-- 🔲 **[MODULE-directory_traversal]** — trigger non soddisfatto → SKIP atteso
-- 🔲 **[MODULE-ldap_generic]** — trigger non soddisfatto → SKIP atteso
-
----
+### FASE 2 — Injection
+- ⏭️ **[MODULE-sqlmap]** ci lavora il collega
+- ⏭️ **[MODULE-ghauri]** ci lavora il collega
+- ✅ **[MODULE-sstimap]** 0 findings
+- ✅ **[MODULE-commix]** 0 findings
+- ⏭️ **[MODULE-nosqli]** trigger non soddisfatto (has_sql=true blocca)
+- ⏭️ **[MODULE-ssrf/graphql/xpath/traversal/ldap]** trigger non soddisfatti
 
 ### FASE 3 — Auth
-
-- ⏭️ **[MODULE-jwt_tool]** — `uses_jwt=false` → SKIP atteso
-
----
+- ⏭️ **[MODULE-jwt_tool]** uses_jwt=false
 
 ### FASE 4 — Lang-specific
+- ⏭️ **[MODULE-fickling]** has_eval_on_input=false
+- ⏭️ **[MODULE-phpggc]** has_php=false
+- ⏭️ **[MODULE-symfony]** has_symfony_twig=false
+- ✅ **[MODULE-nodejsscan]** skippato correttamente (language=python, non javascript)
 
-- 🔲 **[MODULE-fickling]** — `has_eval_on_input=false` → SKIP atteso
-- ⏭️ **[MODULE-phpggc]** — `has_php=false` → SKIP
-- ⏭️ **[MODULE-symfony]** — `has_symfony_twig=false` → SKIP
-- 🔲 **[MODULE-nodejsscan]** — verificare se il frontend JS viene rilevato
-
----
-
-### FASE 5 — Upload & File
-
-- ⏭️ **[MODULE-slipit]** — `has_file_upload=false` → SKIP
-- ⏭️ **[MODULE-exiftool]** — `has_file_upload=false` → SKIP
-- ⏭️ **[MODULE-polyglot]** — `has_file_upload=false` → SKIP
-
----
+### FASE 5 — Upload
+- ⏭️ **[MODULE-slipit/exiftool/polyglot]** has_file_upload=false
 
 ### FASE 6 — gRPC & XXE
-
-- ⏭️ **[MODULE-grpcurl]** — `has_grpc=false` → SKIP
-- 🔲 **[MODULE-xxeexploiter]** — ungated, da testare
+- ⏭️ **[MODULE-grpcurl]** has_grpc=false
+- ⏭️ **[MODULE-xxeexploiter]** skippato (no XML-consuming endpoints or XML parsers detected)
 
 ---
 
@@ -148,14 +106,44 @@
 
 | # | Modulo | Descrizione bug | File | Stato fix |
 |---|--------|----------------|------|-----------|
-| 1 | `mapping`, `stack_detector` | `run()` mancava `**kwargs` → `TypeError` in single-module mode quando il core passa `stack=` e `endpoints=` | `modules/mapping/endpoint_parser.py:521`, `orchestrator/stack_detector.py:405` | ✅ Fixato 2026-07-10 |
+| 1 | `mapping`, `stack_detector` | `run()` mancava `**kwargs` → `TypeError` in single-module mode | `modules/mapping/endpoint_parser.py:521`, `orchestrator/stack_detector.py:405` | ✅ Fixato 2026-07-10 |
 
 ---
 
-## Findings interessanti sul target Pwnzer0tt1Shop
+## Findings sul target Pwnzer0tt1Shop
 
-| Modulo | Tipo | File:Riga | Endpoint | Dettaglio |
-|--------|------|-----------|----------|-----------|
-| mapping | endpoint | backend/app.py:158 | POST /api/sell | Parametro `secret` in body JSON — interessante |
-| mapping | endpoint | backend/app.py:100 | POST /api/login | Credenziali in chiaro nel body — candidato SQLi |
-| mapping | endpoint | backend/app.py:135 | POST /api/donate | Parametro `price` — possibile manipolazione valori |
+### semgrep (9 findings)
+
+| Confidence | Tipo | File:Riga | Dettaglio |
+|-----------|------|-----------|-----------|
+| high | injection | backend/app.py:111 | `tainted-sql-string` — f-string SQLi: `WHERE username = '{username}'` |
+| high | sql | backend/app.py:111 | `sqlalchemy-execute-raw-query` — query raw su connessione diretta |
+| high | injection | backend/app.py:111 | `django-sql-injection-cursor-execute` — match cross-rule |
+| high | injection | backend/app.py:145 | `nan-injection` — input utente va in contesto numerico |
+| medium | injection | backend/app.py:103 | `sql-injection-using-db-cursor-execute` |
+| medium | sql | backend/app.py:111 | `formatted-sql-query` — query con formato stringa |
+| high | semgrep | Dockerfile:20 | `missing-user` — container gira come root |
+| medium | semgrep | backend/app.py:272 | `app-run-param-config` — host=0.0.0.0 in app.run() |
+| medium | semgrep | backend/app.py:272 | `debug-enabled` — Flask debug=True in produzione |
+
+### ripgrep (1 finding)
+
+| Confidence | Tipo | File:Riga | Dettaglio |
+|-----------|------|-----------|-----------|
+| low | path_traversal | backend/app.py:229 | `send_file('./db-data/log.txt')` — path hardcoded, da verificare |
+
+### jsluice (55 findings)
+- URL/endpoint dal frontend TypeScript — principalmente riferimenti a `/api/*`
+- Nessun segreto hardcoded trovato (0 `secret` type)
+- Dettaglio completo in `reports/Pwnzer0tt1Shop/jsluice.json`
+
+### trufflehog / gitleaks
+- 0 findings — nessun segreto/credenziale nei file o nella git history
+
+### nuclei (10 findings)
+- Trovate 10 vulnerabilità di tipo Low/Info (tutte relative a `http-missing-security-headers` su http://127.0.0.1:80).
+
+### sstimap / commix / xxeexploiter
+- **sstimap**: 0 findings.
+- **commix**: 0 findings.
+- **xxeexploiter**: Skippato (nessun parser XML o endpoint XML-consuming rilevato nel codice).
