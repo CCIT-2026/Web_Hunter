@@ -54,7 +54,7 @@ class SymfonyRunner(BaseRunner):
                             requires_manual_review=True,
                         )
 
-            if rel in _ENV_FILES or ext in {".env", ".yaml", ".yml"}:
+            if rel in _ENV_FILES or ext in {".yaml", ".yml"} or fpath.name.startswith(".env"):
                 for i, line in enumerate(lines):
                     m = _APP_SECRET.search(line)
                     if m and len(m.group(1)) < 32:

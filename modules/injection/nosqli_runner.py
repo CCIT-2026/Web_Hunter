@@ -16,8 +16,8 @@ class NosqliRunner(BaseRunner):
     MODULE_NAME = "nosqli"
 
     def execute(self):
-        if not (self.stack.get("has_nosql") and not self.stack.get("has_sql_queries")):
-            return "skipped", "skip: trigger=has_nosql AND NOT has_sql_queries not met"
+        if not self.stack.get("has_nosql"):
+            return "skipped", "skip: trigger=has_nosql not met"
 
         tool = next((t for t in ("nosqli", "nosql-injection-tool", "nosqlmap") if self.tool_available(t)), None)
         if not tool:
