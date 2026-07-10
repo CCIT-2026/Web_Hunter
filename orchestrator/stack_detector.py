@@ -402,7 +402,7 @@ class StackDetector:
 # Runner interface
 # ---------------------------------------------------------------------------
 
-def run(service_root: str, service_name: str, report_dir: str, settings: dict | None = None) -> dict:
+def run(service_root: str, service_name: str, report_dir: str, settings: dict | None = None, **kwargs) -> dict:
     import datetime
 
     t0 = time.monotonic()
