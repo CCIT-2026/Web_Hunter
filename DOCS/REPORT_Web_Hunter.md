@@ -199,3 +199,34 @@
 - ✅ **[MODULE-semgrep]**: 5 findings (rilevati segreti in `compose.yml` e criticità su decrittazione `openssl_decrypt` non validata in `User.php`, `ProductOrder.php`, e `OrderShare.php`).
 - ✅ **[MODULE-symfony]**: Eseguito correttamente (0 findings, il codice non fa uso diretto di Twig dinamico o segreti di framework in formato `.env`).
 - ⏭️ **[MODULE-slipit / exiftool / polyglot]**: Skippati (gated sulla presenza di endpoint mappati in `endpoints_map.json`, che è vuoto a causa del router custom del servizio).
+
+---
+
+# PCSS — Report di Test Moduli
+> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/PCSS` (Python CLI app)  
+> **Data**: 2026-07-10  
+
+## Stack Rilevato
+- `language`: `python`
+- `uses_jwt`: `true` (trovato a `main.py:59` e `main.py:76`)
+
+## Esiti Moduli Testati
+- ✅ **[MODULE-mapping]**: Eseguito correttamente (0 endpoint HTTP estratti, trattandosi di CLI).
+- ✅ **[MODULE-jwt_tool]**: Eseguito e skippato correttamente (`skip: verifica JWT robusta, vedi main.py:59`). Valida perfettamente la logica di gating del modulo che rileva JWT ma salta l'attacco attivo in assenza di debolezze palesi.
+
+---
+
+# Skypedia — Report di Test Moduli
+> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/Skypedia` (Javascript/Express backend)  
+> **Data**: 2026-07-10  
+
+## Stack Rilevato
+- `language`: `javascript`
+- `framework`: `express`
+- `uses_jwt`: `true`
+- `has_file_upload`: `true`
+
+## Esiti Moduli Testati
+- ✅ **[MODULE-mapping]**: Estratti 13 endpoint correttamente da `server.mjs` ed `auth.mjs`.
+- ✅ **[MODULE-nodejsscan]**: Eseguito con successo (0 findings). Valida il caricamento dei moduli JavaScript/Node.js della suite ed esegue l'analisi statica nodejsscan senza errori.
+
