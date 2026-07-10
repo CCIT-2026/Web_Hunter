@@ -63,6 +63,9 @@ MODULE_REGISTRY: dict[str, str] = {
     "commix":   "modules.injection.commix_runner",
     "nosqli":   "modules.injection.nosqli_runner",
 
+    # --- auth probe (Phase 1.5 — prima dei moduli di injection) ---
+    "session_probe": "modules.auth.session_probe",
+
     # --- gated: auth ---
     "jwt_tool": "modules.auth.jwt_tool_runner",
 
@@ -154,7 +157,17 @@ class Orchestrator:
         endpoints = self._load_json("endpoints_map.json")
 
         if self.single_module:
+            # In single-module mode, esegui session_probe prima dei moduli injection
+            # così auth_state.json è disponibile anche con --module=sqlmap
+            _NEEDS_AUTH = {"sqlmap", "ghauri", "nosqli", "sstimap", "commix"}
+            if self.single_module in _NEEDS_AUTH:
+                logger.info("=== Phase 1.5: session_probe (pre-injection auth) ===")
+                self._run_phase15(stack, endpoints)
             return self._run_single(self.single_module, stack, endpoints)
+
+        # Phase 1.5 — session probe (sequenziale, prima dei moduli injection)
+        logger.info("=== Phase 1.5: session_probe ===")
+        self._run_phase15(stack, endpoints)
 
         # Phase 2 — run all triggered modules in parallel
         logger.info("=== Phase 2: parallel pipeline ===")
@@ -190,6 +203,16 @@ class Orchestrator:
             except Exception as exc:
                 logger.exception("Bootstrap module '%s' failed", mod_name)
                 self._write_stub_report(mod_name, "error", str(exc))
+
+    def _run_phase15(self, stack: dict, endpoints: list):
+        """Esegue session_probe in modo sequenziale prima dei moduli di injection."""
+        try:
+            fn = _load_runner("session_probe")
+            fn(self.service_root, self.service_name, self.report_dir, self.settings,
+               stack=stack, endpoints=endpoints)
+        except Exception as exc:
+            logger.warning("session_probe failed: %s — continuing without auth", exc)
+            self._write_stub_report("session_probe", "error", str(exc))
 
     # -----------------------------------------------------------------------
     # Single-module mode

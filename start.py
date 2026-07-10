@@ -50,6 +50,15 @@ _DEFAULT_SETTINGS = {
     "max_workers": 4,
     "target_url": "",
     "grpc_addr": "localhost:50051",
+    "test_user": {
+        "username":   "ctf_probe",
+        "password":   "Probe1234!",
+        "email":      "probe@ctf.local",
+        "phone":      "0000000000",
+        "first_name": "CTF",
+        "last_name":  "Probe",
+        "name":       "CTF Probe",
+    },
 }
 _IMAGE_NAME = "ctf-recon-suite:latest"
 
@@ -390,6 +399,20 @@ def _replace_port_in_service(
     return changed
 
 
+def _is_privileged_port(port: int, engine: str) -> bool:
+    """True se la porta non può essere bindata da podman rootless."""
+    if engine != "podman" or port >= 1024:
+        return False
+    try:
+        r = subprocess.run(
+            ["sysctl", "-n", "net.ipv4.ip_unprivileged_port_start"],
+            capture_output=True, text=True,
+        )
+        return port < int(r.stdout.strip())
+    except Exception:
+        return port < 1024
+
+
 def _wait_for_service(url: str, timeout: int = 20) -> bool:
     print(f"{_C.CYAN}{_C.BOLD}→{_C.RESET}  Attendo {url}", end="", flush=True)
     for _ in range(timeout):
@@ -455,8 +478,18 @@ def _start_target_service(engine: str, service_path: str, settings: dict) -> "st
 
     dbg(host=host, detected_port=port)
 
-    # Gestione conflitto porta
-    if _is_port_busy(host, port):
+    # Gestione porta privilegiata (podman rootless non può bindare < 1024)
+    if _is_privileged_port(port, engine):
+        free = _find_free_ports(exclude=_BURP_RESERVED | {port})
+        new_port = free[0] if free else port + 8000
+        warn(f"Porta {port} privilegiata con podman rootless — rimappo a {new_port}")
+        changed = _replace_port_in_service(service_path, host, port, host, new_port)
+        if changed:
+            ok(f"File aggiornati: {', '.join(changed)}")
+        port = new_port
+
+    # Gestione conflitto porta (porta già in uso)
+    elif _is_port_busy(host, port):
         warn(f"Porta {port} occupata su {host}.")
         alt_host = "127.0.0.2"
         if not _is_port_busy(alt_host, port):
@@ -480,11 +513,9 @@ def _start_target_service(engine: str, service_path: str, settings: dict) -> "st
     # Avvia (solo se c'è compose; altrimenti l'utente lo ha già avviato coi pre-comandi)
     if compose_file:
         step(f"{engine} compose up -d")
-        r = run_cmd([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
+        r = run_interactive([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
         if r.returncode != 0:
-            err("Avvio servizio fallito.")
-            if not _verbose:
-                warn("Riavvia con --verbose per i dettagli.")
+            err("Avvio servizio fallito — vedi output sopra.")
             return None
 
     target_url = f"http://{host}:{port}"
@@ -582,10 +613,51 @@ def main():
         _clone_reports(engine, clone_url, report_dir, service_name)
         return
 
-    # Avvio interattivo del servizio target (solo se target_url non è già impostato)
+    # Avvio del servizio target
     if not args.no_target:
-        if settings.get("target_url"):
-            step(f"target_url da settings: {settings['target_url']}")
+        target_url = settings.get("target_url")
+        if target_url:
+            step(f"target_url da settings: {target_url}")
+            # Verifica che il servizio sia effettivamente raggiungibile
+            try:
+                host, port_str = target_url.rstrip("/").rsplit(":", 1)
+                reachable = _is_port_busy(host.replace("http://", "").replace("https://", ""), int(port_str))
+            except Exception:
+                reachable = False
+            if not reachable:
+                warn(f"Servizio non raggiungibile su {target_url} — provo ad avviarlo...")
+                compose_file = _detect_compose_file(service_path)
+                if compose_file:
+                    # Estrai host e porta dalla target_url salvata
+                    try:
+                        from urllib.parse import urlparse
+                        _p = urlparse(target_url)
+                        svc_host = _p.hostname or "127.0.0.1"
+                        svc_port = _p.port or 80
+                    except Exception:
+                        svc_host, svc_port = "127.0.0.1", 80
+
+                    # Rimappa porta privilegiata se necessario
+                    if _is_privileged_port(svc_port, engine):
+                        free = _find_free_ports(exclude=_BURP_RESERVED | {svc_port})
+                        new_port = free[0] if free else svc_port + 8000
+                        warn(f"Porta {svc_port} privilegiata con podman rootless — rimappo a {new_port}")
+                        changed = _replace_port_in_service(service_path, svc_host, svc_port, svc_host, new_port)
+                        if changed:
+                            ok(f"File aggiornati: {', '.join(changed)}")
+                        svc_port = new_port
+                        target_url = f"http://{svc_host}:{svc_port}"
+                        settings["target_url"] = target_url
+                        _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+                        ok(f"target_url aggiornato → {target_url}")
+
+                    r = run_interactive([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
+                    if r.returncode != 0:
+                        err("Avvio servizio fallito — vedi output sopra.")
+                    else:
+                        _wait_for_service(target_url)
+                else:
+                    warn("Nessun docker-compose trovato — avvia il servizio manualmente.")
         else:
             _start_target_service(engine, service_path, settings)
 

@@ -66,8 +66,11 @@ TRIGGERS = {
     "polyglot":   lambda s: s.get("has_file_upload", False),
 
     # --- injection: SQL / NoSQL ---
-    "sqlmap":     lambda s: s.get("has_sql_queries", False),
-    "ghauri":     lambda s: s.get("has_sql_queries", False),
+    # sqlmap/ghauri girano su qualsiasi endpoint parametrizzato: il gate has_sql_queries
+    # bloccava l'esecuzione quando lo stack_detector non riconosceva pattern ORM non standard,
+    # rendendo i due tool ciechi. Il gating fine (priorità endpoint SQL-adjacent) resta nel runner.
+    "sqlmap":     lambda s: True,
+    "ghauri":     lambda s: True,
     "nosqli":     lambda s: s.get("has_nosql", False) and not s.get("has_sql_queries", False),
 
     # --- injection: template / command (complemento tool-based, guidati dal mapping) ---
