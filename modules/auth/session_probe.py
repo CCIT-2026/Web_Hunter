@@ -225,7 +225,9 @@ class SessionProbeRunner(BaseRunner):
             "cookie":      cookie,
             "auth_header": auth_header,
         })
-        (self.report_dir / "auth_state.json").write_text(_json.dumps(state, indent=2))
+        out = self.report_dir / "json_reports" / "auth_state.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(_json.dumps(state, indent=2))
 
 
 run = make_run_fn(SessionProbeRunner)

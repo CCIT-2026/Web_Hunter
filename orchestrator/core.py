@@ -268,7 +268,7 @@ class Orchestrator:
     # -----------------------------------------------------------------------
 
     def _load_json(self, filename: str) -> Any:
-        p = Path(self.report_dir) / filename
+        p = Path(self.report_dir) / "json_reports" / filename
         if not p.exists():
             logger.warning("%s not found — returning empty structure", filename)
             return [] if "map" in filename else {}

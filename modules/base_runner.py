@@ -123,7 +123,7 @@ class BaseRunner:
     # -----------------------------------------------------------------------
 
     def _load_json(self, filename: str) -> Any:
-        p = self.report_dir / filename
+        p = self.report_dir / "json_reports" / filename
         if not p.exists():
             return None
         try:

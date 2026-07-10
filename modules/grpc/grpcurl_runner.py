@@ -105,7 +105,7 @@ class GrpcurlRunner(BaseRunner):
 
     def _append_endpoint(self, rpc_path: str, service_name: str):
         """Append gRPC endpoint to endpoints_map.json for downstream injection runners."""
-        ep_file = self.report_dir / "endpoints_map.json"
+        ep_file = self.report_dir / "json_reports" / "endpoints_map.json"
         try:
             eps = json.loads(ep_file.read_text()) if ep_file.exists() else []
         except Exception:

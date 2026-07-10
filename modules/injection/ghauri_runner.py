@@ -98,6 +98,13 @@ class GhauriRunner(BaseRunner):
 
         rc, stdout, stderr = self.sh(cmd, timeout=self.timeout * 3)
 
+        slug = ep["path"].replace("/", "_").strip("_") or "root"
+        raw_dir = self.report_dir / "raw_datas"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / f"ghauri_{slug}.txt").write_text(
+            f"CMD: {' '.join(cmd)}\nRC: {rc}\n\n--- STDOUT ---\n{stdout}\n\n--- STDERR ---\n{stderr}"
+        )
+
         if rc == -1:
             return
         if rc == -2:

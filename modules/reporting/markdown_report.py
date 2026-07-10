@@ -126,8 +126,8 @@ def generate(service_name: str, report_dir: str) -> Path:
     out = report_dir / "extended_report.md"
 
     # Contract files rimangono in root; report JSON dei moduli in json_reports/
-    stack = _load_json(report_dir / "detected_stack.json") or {}
-    endpoints = _load_json(report_dir / "endpoints_map.json") or []
+    stack = _load_json(json_dir / "detected_stack.json") or {}
+    endpoints = _load_json(json_dir / "endpoints_map.json") or []
 
     lines: list[str] = []
 
