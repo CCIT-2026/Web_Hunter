@@ -1,0 +1,14 @@
+{
+  "webhook_url": "",
+  "webhook_port": 18080,
+  "webhook_bind": "0.0.0.0",
+  "rate_limit_rps": null,
+  "timeout_seconds": 60,
+  "engine": "docker",
+  "wordlists_path": "/home/wordlists",
+  "payload_library_path": "/assets/payloads_all_the_things.json",
+  "payload_library_max_per_endpoint": 3,
+  "max_workers": 4,
+  "target_url": "http://127.0.0.1:80",
+  "grpc_addr": "localhost:50051"
+}

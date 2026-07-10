@@ -1,3 +1,4 @@
 reports/*
 example*
 settings.json
+*/__pycache__/*
