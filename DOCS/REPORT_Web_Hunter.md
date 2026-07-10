@@ -25,25 +25,25 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
 | **semgrep** | ✅ (3 find) | - | ✅ (5 find) | - | - | ✅ (9 find) | - |
 | **ripgrep** | - | - | - | - | - | ✅ (1 find) | - |
 | **jsluice** | - | - | - | - | - | ✅ (55 find) | - |
-| **trufflehog / gitleaks** | - | - | - | - | - | ✅ (0 find) | - |
+| **trufflehog / gitleaks** | - | - | - | - | - | ✅ (1 find) | ✅ (1 find) |
 | **nuclei** | - | - | - | - | - | ✅ (10 find) | - |
-| **sstimap / commix** | - | - | - | - | - | ✅ (0 find) | - |
-| **phpggc** | ✅ (0 find) | - | - | - | - | - | - |
-| **symfony** | ⏭️ (skip) | - | ✅ (0 find) | - | - | - | - |
+| **sstimap / commix** | - | - | - | - | - | - | ✅ (3 find) |
+| **phpggc** | - | - | - | - | - | - | ✅ (5 find) |
+| **symfony** | ⏭️ (skip) | - | - | - | - | - | ✅ (3 find) |
 | **grpcurl** | - | ✅ (32 find) | - | - | - | - | - |
-| **jwt_tool** | - | - | - | ⏭️ (skip) | - | - | - |
-| **nodejsscan** | - | - | - | - | ✅ (0 find) | ⏭️ (skip) | - |
-| **slipit** | - | - | ⏭️ (skip) | - | ✅ (0 find) | - | - |
-| **polyglot** | - | - | ⏭️ (skip) | - | ✅ (0 find) | - | - |
-| **exiftool** | - | - | ⏭️ (skip) | - | - | - | ✅ (0 find) |
+| **jwt_tool** | - | - | - | ⏭️ (skip) | - | - | ✅ (1 find) |
+| **nodejsscan** | - | - | - | - | - | ⏭️ (skip) | ✅ (10 find) |
+| **slipit** | - | - | ⏭️ (skip) | - | - | - | ✅ (28 find) |
+| **polyglot** | - | - | ⏭️ (skip) | - | - | - | ✅ (28 find) |
+| **exiftool** | - | - | ⏭️ (skip) | - | - | - | ✅ (3 find) |
 | **xxeexploiter** | - | - | - | - | - | ⏭️ (skip) | ✅ (16 find) |
 | **fickling** | - | - | - | - | - | ⏭️ (skip) | ✅ (1 find) |
 | **nosqli** | - | - | - | - | - | ⏭️ (skip) | ✅ (15 find) |
 | **ssrf_generic** | - | - | - | - | - | ⏭️ (skip) | ✅ (11 find) |
 | **directory_traversal** | ⏭️ (skip) | - | - | - | - | ⏭️ (skip) | ✅ (3 find) |
-| **graphql_generic** | - | - | - | - | - | ⏭️ (skip) | ⏭️ (skip) |
-| **xpath_generic** | - | - | - | - | - | ⏭️ (skip) | ⏭️ (skip) |
-| **ldap_generic** | - | - | - | - | - | ⏭️ (skip) | ⏭️ (skip) |
+| **graphql_generic** | - | - | - | - | - | ⏭️ (skip) | ✅ (1 find) |
+| **xpath_generic** | - | - | - | - | - | ⏭️ (skip) | ✅ (3 find) |
+| **ldap_generic** | - | - | - | - | - | ⏭️ (skip) | ✅ (3 find) |
 
 ---
 
