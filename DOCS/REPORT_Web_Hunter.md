@@ -147,3 +147,55 @@
 - **sstimap**: 0 findings.
 - **commix**: 0 findings.
 - **xxeexploiter**: Skippato (nessun parser XML o endpoint XML-consuming rilevato nel codice).
+
+---
+
+# CCalendar — Report di Test Moduli
+> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/CCalendar` (PHP backend, porta 8443 HTTPS)  
+> **Data**: 2026-07-10  
+
+## Stack Rilevato
+- `language`: `php`
+- `has_php`: `true`
+- `has_sql_queries`: `true`
+- `has_file_path_from_input`: `true`
+
+## Esiti Moduli Testati
+- ✅ **[MODULE-mapping]**: Eseguito con successo (0 endpoint estratti per via del router custom PHP non standard).
+- ✅ **[MODULE-stack_detector]**: Rilevato correttamente stack PHP e le vulnerabilità statiche.
+- ✅ **[MODULE-phpggc]**: Eseguito correttamente. Cerca chiamate a `unserialize()` nel codice e non trovandone restituisce 0 findings.
+- ✅ **[MODULE-semgrep]**: Trovati 3 segreti/credenziali hardcoded (chiavi private Nginx e password fittizie in docker-compose).
+- ⏭️ **[MODULE-symfony]**: Skippato correttamente (gated su framework Symfony/Twig).
+- ⏭️ **[MODULE-directory_traversal]**: Skippato (nessun endpoint parametrizzato mappato staticamente).
+
+---
+
+# CheesyCheats — Report di Test Moduli
+> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/CheesyCheats` (Python/Django backend, porta 5555 gRPC)  
+> **Data**: 2026-07-10  
+
+## Stack Rilevato
+- `language`: `python`
+- `has_grpc`: `true`
+- `grpc_proto_files`: Rilevati tutti i file `.proto` (es: `client/cheesycheats.proto`, `api/cheesycheatsAPI.proto`).
+
+## Esiti Moduli Testati
+- ✅ **[MODULE-mapping]**: Estratti 19 endpoint correttamente.
+- ✅ **[MODULE-grpcurl]**: Eseguito con successo. Ha estratto 32 RPC definiti nei file `.proto` (es. `/grpc/Register`, `/grpc/LoginStep1`, `/grpc/SellCheat`) e li ha aggiunti a `endpoints_map.json` come pseudo-endpoint.
+
+---
+
+# DutyFree — Report di Test Moduli
+> **Target servizio**: `/home/mimmo/Documents/CC/SERVIZI/DutyFree` (PHP backend)  
+> **Data**: 2026-07-10  
+
+## Stack Rilevato
+- `language`: `php`
+- `has_php`: `true`
+- `has_symfony_twig`: `true`
+- `has_file_upload`: `true` (trovato in `web/www/handlers/loyalty-scanner.php`)
+
+## Esiti Moduli Testati
+- ✅ **[MODULE-semgrep]**: 5 findings (rilevati segreti in `compose.yml` e criticità su decrittazione `openssl_decrypt` non validata in `User.php`, `ProductOrder.php`, e `OrderShare.php`).
+- ✅ **[MODULE-symfony]**: Eseguito correttamente (0 findings, il codice non fa uso diretto di Twig dinamico o segreti di framework in formato `.env`).
+- ⏭️ **[MODULE-slipit / exiftool / polyglot]**: Skippati (gated sulla presenza di endpoint mappati in `endpoints_map.json`, che è vuoto a causa del router custom del servizio).
