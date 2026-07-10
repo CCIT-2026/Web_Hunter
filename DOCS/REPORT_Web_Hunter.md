@@ -18,22 +18,32 @@ Tutti i test sono stati condotti in **single-module mode** configurando come eng
 
 ## 📋 Riepilogo Esiti dei Moduli
 
-| Modulo | CCalendar | CheesyCheats | DutyFree | PCSS | Skypedia | Pwnzer0tt1Shop |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **mapping** | ✅ (0 ep) | ✅ (19 ep) | ✅ (0 ep) | ✅ (0 ep) | ✅ (13 ep) | ✅ (12 ep) |
-| **stack_detector** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **semgrep** | ✅ (3 find) | - | ✅ (5 find) | - | - | ✅ (9 find) |
-| **ripgrep** | - | - | - | - | - | ✅ (1 find) |
-| **jsluice** | - | - | - | - | - | ✅ (55 find) |
-| **trufflehog / gitleaks** | - | - | - | - | - | ✅ (0 find) |
-| **nuclei** | - | - | - | - | - | ✅ (10 find) |
-| **sstimap / commix** | - | - | - | - | - | ✅ (0 find) |
-| **xxeexploiter** | - | - | - | - | - | ⏭️ (skip) |
-| **phpggc** | ✅ (0 find) | - | - | - | - | - |
-| **symfony** | ⏭️ (skip) | - | ✅ (0 find) | - | - | - |
-| **grpcurl** | - | ✅ (32 find) | - | - | - | - |
-| **jwt_tool** | - | - | - | ⏭️ (skip) | - | - |
-| **nodejsscan** | - | - | - | - | ✅ (0 find) | ⏭️ (skip) |
+| Modulo | CCalendar | CheesyCheats | DutyFree | PCSS | Skypedia | Pwnzer0tt1Shop | DummyService (ad-hoc) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **mapping** | ✅ (0 ep) | ✅ (19 ep) | ✅ (0 ep) | ✅ (0 ep) | ✅ (13 ep) | ✅ (12 ep) | ✅ (8 ep) |
+| **stack_detector** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **semgrep** | ✅ (3 find) | - | ✅ (5 find) | - | - | ✅ (9 find) | - |
+| **ripgrep** | - | - | - | - | - | ✅ (1 find) | - |
+| **jsluice** | - | - | - | - | - | ✅ (55 find) | - |
+| **trufflehog / gitleaks** | - | - | - | - | - | ✅ (0 find) | - |
+| **nuclei** | - | - | - | - | - | ✅ (10 find) | - |
+| **sstimap / commix** | - | - | - | - | - | ✅ (0 find) | - |
+| **phpggc** | ✅ (0 find) | - | - | - | - | - | - |
+| **symfony** | ⏭️ (skip) | - | ✅ (0 find) | - | - | - | - |
+| **grpcurl** | - | ✅ (32 find) | - | - | - | - | - |
+| **jwt_tool** | - | - | - | ⏭️ (skip) | - | - | - |
+| **nodejsscan** | - | - | - | - | ✅ (0 find) | ⏭️ (skip) | - |
+| **slipit** | - | - | ⏭️ (skip) | - | ✅ (0 find) | - | - |
+| **polyglot** | - | - | ⏭️ (skip) | - | ✅ (0 find) | - | - |
+| **exiftool** | - | - | ⏭️ (skip) | - | - | - | ✅ (0 find) |
+| **xxeexploiter** | - | - | - | - | - | ⏭️ (skip) | ✅ (16 find) |
+| **fickling** | - | - | - | - | - | ⏭️ (skip) | ✅ (1 find) |
+| **nosqli** | - | - | - | - | - | ⏭️ (skip) | ✅ (15 find) |
+| **ssrf_generic** | - | - | - | - | - | ⏭️ (skip) | ✅ (11 find) |
+| **directory_traversal** | ⏭️ (skip) | - | - | - | - | ⏭️ (skip) | ✅ (3 find) |
+| **graphql_generic** | - | - | - | - | - | ⏭️ (skip) | ⏭️ (skip) |
+| **xpath_generic** | - | - | - | - | - | ⏭️ (skip) | ⏭️ (skip) |
+| **ldap_generic** | - | - | - | - | - | ⏭️ (skip) | ⏭️ (skip) |
 
 ---
 
