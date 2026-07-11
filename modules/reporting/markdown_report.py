@@ -140,7 +140,7 @@ def generate(service_name: str, report_dir: str) -> Path:
         f"# {service_name}",
         "",
         f"**Language:** {lang}  **Framework:** {fw}  "
-        f"**Path:** {report_dir}  **Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+        f"**Path:** {report_dir}  **Generated:** {datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
     ]
 

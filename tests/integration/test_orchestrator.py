@@ -181,15 +181,17 @@ def test_markdown_report_generated(tmp_path):
     ]
     sqlmap_report = {
         "module": "sqlmap", "service": "test", "status": "completed",
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "skip_reason": None,
         "findings": [{"type": "sqli", "file": "app.py", "line": 42, "endpoint": "/api/login",
                        "method": "POST", "confidence": "high", "detail": "SQLi confirmed",
                        "source_module": "sqlmap", "requires_manual_review": False, "unlikely_path": False}],
     }
-    (tmp_path / "detected_stack.json").write_text(json.dumps(stack))
-    (tmp_path / "endpoints_map.json").write_text(json.dumps(endpoints))
-    (tmp_path / "sqlmap.json").write_text(json.dumps(sqlmap_report))
+    json_dir = tmp_path / "json_reports"
+    json_dir.mkdir()
+    (json_dir / "detected_stack.json").write_text(json.dumps(stack))
+    (json_dir / "endpoints_map.json").write_text(json.dumps(endpoints))
+    (json_dir / "sqlmap.json").write_text(json.dumps(sqlmap_report))
 
     from modules.reporting.markdown_report import generate
     out = generate("test_service", str(tmp_path))

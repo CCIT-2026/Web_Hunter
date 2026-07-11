@@ -44,7 +44,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode(errors="replace") if length else ""
         ping = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
             "remote_addr": self.client_address[0],
             "method": self.command,
             "path": self.path,

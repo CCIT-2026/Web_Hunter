@@ -97,7 +97,7 @@ def generate(service_name: str, report_dir: str) -> Path:
         f"# {service_name} — Quick Report",
         "",
         f"**Language:** {lang}  **Framework:** {fw}  "
-        f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+        f"**Generated:** {datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
     ]
 

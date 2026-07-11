@@ -68,11 +68,11 @@ TRIGGERS = {
     "polyglot":   lambda s: s.get("has_file_upload", False),
 
     # --- injection: SQL / NoSQL ---
-    # sqlmap/ghauri girano su qualsiasi endpoint parametrizzato: il gate has_sql_queries
-    # bloccava l'esecuzione quando lo stack_detector non riconosceva pattern ORM non standard,
-    # rendendo i due tool ciechi. Il gating fine (priorità endpoint SQL-adjacent) resta nel runner.
-    "sqlmap":     lambda s: True,
-    "ghauri":     lambda s: True,
+    # sqlmap/ghauri gated su has_sql_queries: in contesto CTF whitebox il sorgente è disponibile
+    # e le SQLi reali sono quasi sempre raw SQL visibile. Lanciare a vuoto su servizi senza SQL
+    # spreca tempo prezioso. dalfox (XSS) è indipendente da SQL, gira sempre.
+    "sqlmap":     lambda s: s.get("has_sql_queries", False),
+    "ghauri":     lambda s: s.get("has_sql_queries", False),
     "dalfox":     lambda s: True,
     "nosqli":     lambda s: s.get("has_nosql", False) and not s.get("has_sql_queries", False),
 

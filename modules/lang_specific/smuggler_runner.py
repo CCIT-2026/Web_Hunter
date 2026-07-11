@@ -16,19 +16,20 @@ class SmugglerRunner(BaseRunner):
     MODULE_NAME = "smuggler"
 
     def execute(self):
+        if not self.tool_available("smuggler"):
+            return "skipped", "tool not available: smuggler"
+
         target_url = self.settings.get("target_url")
         if not target_url:
             return "skipped", "skip: target_url_missing"
 
-        # Smuggler supporta output log (con -l) ma possiamo anche parsare lo stdout direttamente.
-        # Creiamo un file temporaneo per catturare l'output testuale.
         log_file = self.report_dir / "smuggler.log"
 
         cmd = [
             "smuggler",
             "-u", target_url,
             "-l", str(log_file),
-            "-q"  # Quiet mode will only log issues found
+            "-q"
         ]
 
         try:
@@ -37,7 +38,8 @@ class SmugglerRunner(BaseRunner):
             return "error", str(e)
 
         if rc == -1:
-            # Timeout
+            return "error", "tool not found: smuggler"
+        if rc == -2:
             return "error", "timeout"
 
         if log_file.exists():

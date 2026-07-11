@@ -61,7 +61,7 @@ class BaseRunner:
         report = {
             "module": self.MODULE_NAME,
             "service": self.service_name,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "status": status,
             "skip_reason": skip_reason,
             "findings": self._findings if status == "completed" else [],

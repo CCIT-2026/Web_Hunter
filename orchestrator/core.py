@@ -319,7 +319,7 @@ class Orchestrator:
         report = {
             "module": module_name,
             "service": self.service_name,
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "status": status,
             "skip_reason": reason,
             "findings": [],

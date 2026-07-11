@@ -535,7 +535,7 @@ def run(service_root: str, service_name: str, report_dir: str, settings: dict | 
     report = {
         "module": "mapping",
         "service": service_name,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "status": status,
         "skip_reason": skip_reason,
         "findings": [

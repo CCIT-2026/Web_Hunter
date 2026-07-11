@@ -14,7 +14,6 @@ Usage:
   ./start.py                                           # interattivo
   ./start.py --path=/srv/targets/webapp                # non-interattivo
   ./start.py --path=/srv/targets/webapp --module=sqlmap
-  ./start.py --path=/srv/targets/webapp --clone=git@10.0.0.2:reports/webapp
   ./start.py --path=/srv/targets/webapp --clean        # prune + rimuovi container e immagine
   ./start.py --rebuild                                 # clean + rebuild da zero, poi avvia (chiede il path se manca --path)
   ./start.py --path=/srv/targets/webapp --rebuild      # clean + rebuild + avvia sul servizio dato

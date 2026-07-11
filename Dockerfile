@@ -95,6 +95,11 @@ RUN pip3 install --no-cache-dir --break-system-packages slipit 2>/dev/null || \
 # ── nosqli scanner ───────────────────────────────────────────────────────────
 RUN pip3 install --no-cache-dir --break-system-packages nosqli 2>/dev/null || true
 
+# ── Smuggler ─────────────────────────────────────────────────────────────────
+RUN git clone --depth 1 https://github.com/defparam/smuggler.git /opt/smuggler \
+ && chmod +x /opt/smuggler/smuggler.py \
+ && ln -sf /opt/smuggler/smuggler.py /usr/local/bin/smuggler
+
 # ── SecLists + other wordlists ───────────────────────────────────────────────
 RUN mkdir -p /home/wordlists && \
     git clone --depth 1 https://github.com/danielmiessler/SecLists.git /home/wordlists/SecLists
@@ -117,6 +122,3 @@ WORKDIR /app
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 ENTRYPOINT ["/docker-entrypoint.sh"]
-# ── Smuggler ─────────────────────────────────────────────────────────────────
-RUN git clone --depth 1 https://github.com/defparam/smuggler.git /opt/smuggler \
- && ln -sf /opt/smuggler/smuggler.py /usr/local/bin/smuggler
