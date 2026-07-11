@@ -63,6 +63,13 @@ def main():
         verbose=args.verbose,
     )
 
+    if results.get("_aborted"):
+        _col.header("Riepilogo")
+        _col.err("Analisi interrotta: autenticazione fallita in modo irrecuperabile.")
+        _col.err("Nessun modulo di injection/dynamic è stato eseguito (avrebbe prodotto solo falsi negativi).")
+        _col.err("Correggi le credenziali in settings.json → test_user e rilancia.")
+        sys.exit(1)
+
     skipped = [k for k, v in results.items() if v == "skipped"]
     errors   = [k for k, v in results.items() if isinstance(v, Exception)]
     done     = [k for k, v in results.items() if isinstance(v, dict)]

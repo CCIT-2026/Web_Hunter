@@ -166,12 +166,21 @@ class Orchestrator:
             _NEEDS_AUTH = {"sqlmap", "ghauri", "nosqli", "sstimap", "commix"}
             if self.single_module in _NEEDS_AUTH:
                 _col.header("Phase 1.5 — Autenticazione")
-                self._run_phase15(stack, endpoints)
+                blocked_report = self._run_phase15(stack, endpoints)
+                if blocked_report is not None:
+                    _col.err(f"Modulo '{self.single_module}' richiede autenticazione ma il login "
+                             f"è fallito in modo irrecuperabile — salto.")
+                    return {"session_probe": blocked_report, "_aborted": True}
             return self._run_single(self.single_module, stack, endpoints)
 
         # Phase 1.5 — session probe (sequenziale, prima dei moduli injection)
         _col.header("Phase 1.5 — Autenticazione")
-        self._run_phase15(stack, endpoints)
+        blocked_report = self._run_phase15(stack, endpoints)
+        if blocked_report is not None:
+            _col.err("Pipeline interrotta: autenticazione irrecuperabile — "
+                     "Fase 2 (injection/dynamic) saltata per evitare falsi negativi.")
+            self._generate_markdown_report()
+            return {"session_probe": blocked_report, "_aborted": True}
 
         # Phase 2 — run all triggered modules in parallel
         _col.header("Phase 2 — Analisi Parallela")
@@ -208,15 +217,21 @@ class Orchestrator:
                 logger.exception("Bootstrap module '%s' failed", mod_name)
                 self._write_stub_report(mod_name, "error", str(exc))
 
-    def _run_phase15(self, stack: dict, endpoints: list):
-        """Esegue session_probe in modo sequenziale prima dei moduli di injection."""
+    def _run_phase15(self, stack: dict, endpoints: list) -> dict | None:
+        """Esegue session_probe in modo sequenziale prima dei moduli di injection.
+        Ritorna il report se lo stato è 'blocked' (autenticazione irrecuperabile,
+        la pipeline va interrotta), altrimenti None (si procede normalmente)."""
         try:
             fn = _load_runner("session_probe")
-            fn(self.service_root, self.service_name, self.report_dir, self.settings,
-               stack=stack, endpoints=endpoints)
+            report = fn(self.service_root, self.service_name, self.report_dir, self.settings,
+                        stack=stack, endpoints=endpoints)
         except Exception as exc:
             logger.warning("session_probe failed: %s — continuing without auth", exc)
             self._write_stub_report("session_probe", "error", str(exc))
+            return None
+        if isinstance(report, dict) and report.get("status") == "blocked":
+            return report
+        return None
 
     # -----------------------------------------------------------------------
     # Single-module mode

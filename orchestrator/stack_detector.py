@@ -23,6 +23,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+def _strip_prefix(s: str, prefix: str) -> str:
+    """Rimuove `prefix` solo se è un prefisso letterale di `s`.
+    (str.lstrip(chars) NON fa questo: tratta l'argomento come un insieme di
+    caratteri da togliere uno a uno, non come una sottostringa da tagliare —
+    lstrip('has_') su 'has_xpath_parser' toglie 'has_' per puro caso perché
+    'x' non è in {h,a,s,_}, ma su altre chiavi produce chiavi sbagliate.)"""
+    return s[len(prefix):] if s.startswith(prefix) else s
+
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "vendor", "dist", "build", ".mypy_cache"}
 
 
@@ -160,8 +169,11 @@ class StackDetector:
             "has_outbound_request_on_input": "ssrf_locations",
             "has_graphql_endpoint": "graphql_locations",
             "has_file_upload": "file_upload_locations",
+            "has_file_path_from_input": "path_traversal_locations",
+            "has_xpath_parser": "xpath_locations",
+            "has_ldap_query": "ldap_locations",
         }
-        loc_key = _MAP.get(key, key.lstrip("has_").lstrip("uses_") + "_locations")
+        loc_key = _MAP.get(key, _strip_prefix(_strip_prefix(key, "has_"), "uses_") + "_locations")
         if loc_key not in self._stack:
             loc_key = key + "_locations"
         loc = {"file": file, "line": line}

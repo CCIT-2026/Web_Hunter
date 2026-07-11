@@ -5,6 +5,25 @@ Identifica endpoint di registrazione e login, si autentica usando le
 credenziali stock da settings["test_user"], e salva cookie/token in
 auth_state.json per i runner successivi (sqlmap, ghauri, ecc.).
 
+HTTP layer:
+  - Il corpo della richiesta rispetta l'encoding reale dell'endpoint
+    (form-urlencoded o json), letto da endpoints_map.json — stesso
+    pattern già usato da sqlmap_runner.py e ghauri_runner.py.
+  - Le redirect (3xx) NON vengono seguite automaticamente da urllib:
+    verrebbe perso il Set-Cookie della risposta originale (verificato:
+    urllib converte un POST->302 in un GET automatico e la risposta
+    finale non porta più l'header Set-Cookie del hop intermedio).
+    Le seguiamo a mano, hop per hop, riattaccando ad ogni hop i cookie
+    già raccolti, fino a un cap di hop.
+
+Success detection (per app a redirect, es. Flask con flash()+redirect):
+  - Non ci basiamo sulla sola presenza di un Set-Cookie: molte app
+    (Flask in testa) impostano un cookie di sessione anche sul path di
+    fallimento, perché flash() scrive comunque nella sessione. L'unico
+    segnale non ambiguo è la destinazione finale della catena di
+    redirect: se atterriamo di nuovo su login o su register, è un
+    fallimento certo, non un'euristica.
+
 State machine (persistente in reports/<service>/auth_state.json):
 
   unregistered → registered → logged_in
@@ -15,20 +34,25 @@ Flusso execute():
   1. Trova login_ep e register_ep tra gli endpoint mappati
   2. Tenta login → successo → salva stato, fine
   3. Login fallisce → tenta register → tenta login → successo → salva stato
-  4. Tutto fallisce → salva stato fallito, i runner successivi girano senza auth
+  4. Tutto fallisce → HARD STOP: stampa errore rosso e ritorna status
+     "blocked". L'orchestratore (orchestrator/core.py) interrompe la
+     pipeline per questo servizio invece di far girare i moduli di
+     injection/dynamic senza sessione (che produrrebbero solo falsi
+     negativi silenziosi).
 """
 
 import json as _json
 import urllib.request
 import urllib.error
-from pathlib import Path
+import urllib.parse
 
 from modules.base_runner import BaseRunner, make_run_fn
-from orchestrator.colors import step as _step_raw, ok as _ok_raw, warn as _warn_raw
+from orchestrator.colors import step as _step_raw, ok as _ok_raw, warn as _warn_raw, err as _err_raw
 
 def _step(msg: str): _step_raw(f"[session_probe] {msg}")
 def _ok(msg: str):   _ok_raw(f"[session_probe] {msg}")
 def _warn(msg: str): _warn_raw(f"[session_probe] {msg}")
+def _err(msg: str):  _err_raw(f"[session_probe] {msg}")
 
 # ---------------------------------------------------------------------------
 # Credential field families
@@ -49,6 +73,8 @@ _REGISTER_KEYWORDS = {"register", "signup", "sign_up", "registration", "create",
 
 _INJECTION_MODULES = {"sqlmap", "ghauri", "nosqli", "sstimap", "commix"}
 
+_MAX_REDIRECT_HOPS = 5
+
 
 def _match_field(name: str, test_user: dict) -> str | None:
     low = name.lower().replace("-", "_")
@@ -62,6 +88,17 @@ def _path_tokens(path: str) -> set[str]:
     return set(path.lower().replace("-", "_").replace("/", " ").split())
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Blocca il redirect automatico: una 3xx arriva al chiamante come
+    HTTPError con lo status/headers ORIGINALI (Set-Cookie incluso), invece
+    di sparire dentro un GET automatico che urllib farebbe da solo."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 class SessionProbeRunner(BaseRunner):
     MODULE_NAME = "session_probe"
 
@@ -73,20 +110,20 @@ class SessionProbeRunner(BaseRunner):
 
         target_base = (self.settings.get("target_url") or "http://localhost").rstrip("/")
 
-        login_ep    = self._find_endpoint(_LOGIN_KEYWORDS)
-        register_ep = self._find_endpoint(_REGISTER_KEYWORDS)
+        self._login_ep    = self._find_endpoint(_LOGIN_KEYWORDS)
+        self._register_ep = self._find_endpoint(_REGISTER_KEYWORDS)
 
-        if not login_ep:
+        if not self._login_ep:
             _warn("nessun endpoint di login trovato — salto")
             return "skipped", "skip: nessun endpoint di login trovato"
 
-        _step(f"login → {login_ep['path']}")
+        _step(f"login → {self._login_ep['path']}")
 
         state = self._load_state()
         already_registered = state.get("registered", False)
 
         # Tenta login diretto
-        ok, cookie, auth_header = self._do_login(target_base, login_ep, test_user)
+        ok, cookie, auth_header, reason = self._do_login(target_base, self._login_ep, test_user)
         if ok:
             if already_registered:
                 _ok("già registrato — login OK")
@@ -96,32 +133,45 @@ class SessionProbeRunner(BaseRunner):
             return "completed", None
 
         # Login fallito → registra (o ri-registra dopo reset servizio)
-        if register_ep:
+        if self._register_ep:
             if already_registered:
-                _warn("login fallito (service reset?) — ri-registro...")
+                _warn(f"login fallito ({reason}) — service reset? ri-registro...")
             else:
-                _step(f"login fallito — registro nuovo utente → {register_ep['path']}")
-            self._do_register(target_base, register_ep, test_user)
-            ok, cookie, auth_header = self._do_login(target_base, login_ep, test_user)
+                _step(f"login fallito ({reason}) — registro nuovo utente → {self._register_ep['path']}")
+            self._do_register(target_base, self._register_ep, test_user)
+            ok, cookie, auth_header, reason = self._do_login(target_base, self._login_ep, test_user)
             if ok:
                 _ok("registrato e loggato con successo")
                 self._save_state(state, cookie, auth_header, registered=True, logged_in=True)
                 return "completed", None
 
-        # Tutto fallito
-        _warn("autenticazione fallita — i runner procedono senza sessione")
+        # Tutto fallito — hard stop: niente sessione valida, i moduli a valle
+        # (injection, dalfox, ...) andrebbero avanti "alla cieca" contro
+        # endpoint protetti e produrrebbero solo falsi negativi silenziosi.
+        _err(f"AUTENTICAZIONE FALLITA ({reason}).")
+        _err("I moduli che richiedono login (sqlmap, ghauri, dalfox, directory_traversal, ...) "
+             "verrebbero eseguiti senza sessione valida: pipeline interrotta per evitare un report "
+             "pieno di falsi negativi.")
+        _err(f"Verifica le credenziali in settings.json → test_user "
+             f"(username attuale: {test_user.get('username')!r}) e rilancia.")
         self._save_state(state, None, None, registered=already_registered, logged_in=False)
-        return "completed", "warn: autenticazione fallita — i runner procedono senza sessione"
+        return "blocked", f"auth hard-fail: {reason}"
 
     # ------------------------------------------------------------------
     # Endpoint detection
     # ------------------------------------------------------------------
 
     def _find_endpoint(self, keywords: set) -> dict | None:
-        for ep in self.endpoints:
-            if _path_tokens(ep["path"]) & keywords:
-                return ep
-        return None
+        """Tra gli endpoint il cui path richiama login/register, preferisce
+        quello POST con parametri body: molte app (Flask in testa) mappano
+        sia una GET (rende il form, nessun parametro) sia una POST (riceve
+        le credenziali) sullo stesso path — prendere la prima in ordine di
+        file rischia di agganciare la GET e non avere mai nulla da inviare."""
+        matches = [ep for ep in self.endpoints if _path_tokens(ep["path"]) & keywords]
+        if not matches:
+            return None
+        posts = [ep for ep in matches if ep.get("method") in ("POST", "PUT", "PATCH") and ep.get("params")]
+        return posts[0] if posts else matches[0]
 
     # ------------------------------------------------------------------
     # Payload builder
@@ -137,75 +187,126 @@ class SessionProbeRunner(BaseRunner):
                 payload[p["name"]] = val
         return payload
 
+    def _encode_body(self, ep: dict, payload: dict) -> tuple[bytes, str]:
+        """Rispetta l'encoding reale dell'endpoint (letto da endpoints_map.json),
+        stesso pattern di sqlmap_runner.py / ghauri_runner.py."""
+        body_params = [p for p in ep.get("params", []) if p.get("location") == "body"]
+        use_json = any(p.get("encoding") == "json" for p in body_params)
+        if use_json:
+            return _json.dumps(payload).encode(), "application/json"
+        return urllib.parse.urlencode(payload).encode(), "application/x-www-form-urlencoded"
+
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
 
-    def _post_json(self, url: str, payload: dict) -> tuple[int, dict, str]:
-        data = _json.dumps(payload).encode()
-        req = urllib.request.Request(
-            url, data=data,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            method="POST",
-        )
+    def _raw_request(self, url: str, data: bytes | None = None, method: str = "GET",
+                      content_type: str | None = None, cookies: dict | None = None):
+        """Singola chiamata HTTP, non segue mai i redirect.
+        Ritorna (status, headers_message_obj, body)."""
+        headers = {"Accept": "*/*"}
+        if content_type:
+            headers["Content-Type"] = content_type
+        if cookies:
+            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status, dict(resp.headers), resp.read().decode(errors="replace")
+            resp = _OPENER.open(req, timeout=10)
+            return resp.status, resp.headers, resp.read().decode(errors="replace")
         except urllib.error.HTTPError as e:
-            return e.code, dict(e.headers), e.read().decode(errors="replace")
+            return e.code, e.headers, e.read().decode(errors="replace")
         except Exception as e:
             return -1, {}, str(e)
 
-    def _extract_auth(self, headers: dict, body: str) -> tuple[str | None, str | None]:
-        cookie = None
-        auth_header = None
+    def _merge_cookies(self, headers, into: dict) -> None:
+        """Accumula ogni Set-Cookie della risposta (possono essere più di uno) in `into`."""
+        if not headers:
+            return
+        try:
+            raw_cookies = headers.get_all("Set-Cookie") or []
+        except AttributeError:
+            single = headers.get("Set-Cookie") if hasattr(headers, "get") else None
+            raw_cookies = [single] if single else []
+        for raw in raw_cookies:
+            name_value = raw.split(";")[0].strip()
+            if "=" in name_value:
+                name, _, value = name_value.partition("=")
+                into[name] = value
 
-        raw_cookie = headers.get("Set-Cookie") or headers.get("set-cookie", "")
-        if raw_cookie:
-            cookie = raw_cookie.split(";")[0].strip()
-
+    def _token_from_body(self, body: str) -> str | None:
         try:
             data = _json.loads(body)
-            if isinstance(data, dict):
-                for key in ("token", "access_token", "jwt", "auth_token", "id_token", "accessToken"):
-                    if key in data:
-                        auth_header = f"Authorization: Bearer {data[key]}"
-                        break
         except Exception:
-            pass
+            return None
+        if isinstance(data, dict):
+            for key in ("token", "access_token", "jwt", "auth_token", "id_token", "accessToken"):
+                if key in data:
+                    return f"Authorization: Bearer {data[key]}"
+        return None
 
-        return cookie or None, auth_header or None
+    def _follow_redirects(self, base_url: str, location: str, cookies: dict) -> tuple[str, bool]:
+        """Segue a mano la catena di redirect (riattaccando i cookie già
+        raccolti ad ogni hop), fino a _MAX_REDIRECT_HOPS.
+        Ritorna (path_di_destinazione_finale, e' un loop senza uscita)."""
+        current = urllib.parse.urljoin(base_url, location)
+        for _ in range(_MAX_REDIRECT_HOPS):
+            status, headers, _body = self._raw_request(current, method="GET", cookies=cookies)
+            self._merge_cookies(headers, cookies)
+            if 300 <= status < 400:
+                loc = headers.get("Location") if headers else None
+                if not loc:
+                    break
+                current = urllib.parse.urljoin(current, loc)
+                continue
+            return urllib.parse.urlparse(current).path, False
+        return urllib.parse.urlparse(current).path, True
 
-    def _is_success(self, status: int, body: str) -> bool:
-        if status in (200, 201):
-            return True
-        # Alcuni server ritornano 4xx ma con token nel body
-        try:
-            data = _json.loads(body)
-            if isinstance(data, dict):
-                for key in ("token", "access_token", "jwt", "auth_token"):
-                    if key in data:
-                        return True
-        except Exception:
-            pass
-        return False
-
-    def _do_login(self, base: str, ep: dict, test_user: dict) -> tuple[bool, str | None, str | None]:
+    def _submit(self, base: str, ep: dict, test_user: dict) -> tuple[bool, str | None, str | None, str | None]:
+        """POST delle credenziali su `ep`.
+        Ritorna (success, cookie_header, auth_header, reason_se_fallito)."""
         payload = self._build_payload(ep, test_user)
         if not payload:
-            return False, None, None
-        status, headers, body = self._post_json(f"{base}{ep['path']}", payload)
-        if self._is_success(status, body):
-            cookie, auth_header = self._extract_auth(headers, body)
-            return True, cookie, auth_header
-        return False, None, None
+            return False, None, None, "nessun campo credenziali mappato sull'endpoint"
+
+        data, content_type = self._encode_body(ep, payload)
+        url = f"{base}{ep['path']}"
+        status, headers, body = self._raw_request(url, data=data, method="POST", content_type=content_type)
+
+        cookies: dict = {}
+        self._merge_cookies(headers, cookies)
+
+        if 200 <= status < 300:
+            auth_header = self._token_from_body(body)
+            cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items()) or None
+            return True, cookie_str, auth_header, None
+
+        if 300 <= status < 400:
+            location = headers.get("Location") if headers else None
+            if not location:
+                return False, None, None, f"redirect {status} senza header Location"
+
+            final_path, looped = self._follow_redirects(url, location, cookies)
+            if looped:
+                return False, None, None, f"redirect loop (>{_MAX_REDIRECT_HOPS} hop) senza destinazione stabile"
+
+            login_path    = self._login_ep["path"] if self._login_ep else None
+            register_path = self._register_ep["path"] if self._register_ep else None
+            if final_path in (login_path, register_path):
+                return False, None, None, f"redirect terminato su {final_path} (credenziali rifiutate)"
+
+            cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items()) or None
+            return True, cookie_str, None, None
+
+        if status == -1:
+            return False, None, None, f"connessione fallita: {body}"
+        return False, None, None, f"HTTP {status}"
+
+    def _do_login(self, base: str, ep: dict, test_user: dict) -> tuple[bool, str | None, str | None, str | None]:
+        return self._submit(base, ep, test_user)
 
     def _do_register(self, base: str, ep: dict, test_user: dict) -> bool:
-        payload = self._build_payload(ep, test_user)
-        if not payload:
-            return False
-        status, _, _ = self._post_json(f"{base}{ep['path']}", payload)
-        return status in (200, 201)
+        ok, *_rest = self._submit(base, ep, test_user)
+        return ok
 
     # ------------------------------------------------------------------
     # State persistence
