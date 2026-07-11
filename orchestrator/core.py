@@ -110,6 +110,18 @@ GENERIC_CATEGORY_KWARGS: dict[str, dict] = {
     "ldap_generic":        {"category": "ldap"},
 }
 
+# Moduli dinamici che colpiscono la superficie HTTP autenticata: senza una
+# sessione valida (session_probe → "blocked") produrrebbero solo falsi negativi
+# silenziosi contro endpoint protetti. Su auth "blocked" questi vengono SALTATI,
+# ma tutti i moduli statici (semgrep, ripgrep, jsluice, trufflehog, gitleaks,
+# nodejsscan, phpggc, ...) girano comunque: non toccano il target e restano l'MVP
+# del whitebox A/D.
+_AUTH_DEPENDENT_DYNAMIC = {
+    "sqlmap", "ghauri", "nosqli", "sstimap", "commix", "dalfox",
+    "ssrf_generic", "graphql_generic", "xpath_generic",
+    "directory_traversal", "ldap_generic",
+}
+
 
 # ---------------------------------------------------------------------------
 # Loader dinamico
@@ -163,8 +175,7 @@ class Orchestrator:
         endpoints = self._load_json("endpoints_map.json")
 
         if self.single_module:
-            _NEEDS_AUTH = {"sqlmap", "ghauri", "nosqli", "sstimap", "commix"}
-            if self.single_module in _NEEDS_AUTH:
+            if self.single_module in _AUTH_DEPENDENT_DYNAMIC:
                 _col.header("Phase 1.5 — Autenticazione")
                 blocked_report = self._run_phase15(stack, endpoints)
                 if blocked_report is not None:
@@ -176,16 +187,25 @@ class Orchestrator:
         # Phase 1.5 — session probe (sequenziale, prima dei moduli injection)
         _col.header("Phase 1.5 — Autenticazione")
         blocked_report = self._run_phase15(stack, endpoints)
-        if blocked_report is not None:
-            _col.err("Pipeline interrotta: autenticazione irrecuperabile — "
-                     "Fase 2 (injection/dynamic) saltata per evitare falsi negativi.")
-            self._generate_markdown_report()
-            return {"session_probe": blocked_report, "_aborted": True}
+        auth_blocked = blocked_report is not None
 
         # Phase 2 — run all triggered modules in parallel
         _col.header("Phase 2 — Analisi Parallela")
         to_run   = [m for m in modules_to_run(stack) if m not in ("mapping", "stack_detector")]
         skipped  = skipped_modules(stack)
+
+        # Auth "blocked": salta SOLO i moduli dinamici auth-dipendenti; i moduli
+        # statici girano comunque (non toccano il target, nessun falso negativo).
+        if auth_blocked:
+            deferred = [m for m in to_run if m in _AUTH_DEPENDENT_DYNAMIC]
+            to_run   = [m for m in to_run if m not in _AUTH_DEPENDENT_DYNAMIC]
+            for name in deferred:
+                skipped[name] = "skip: autenticazione fallita — modulo dinamico auth-dipendente non eseguito"
+                self._write_stub_report(name, "skipped", "auth blocked: nessuna sessione valida")
+            _col.warn(
+                f"Autenticazione fallita: {len(deferred)} moduli dinamici saltati "
+                f"({', '.join(deferred) or '—'}); proseguo con i moduli statici."
+            )
 
         self._log_skip_plan(to_run, skipped)
 

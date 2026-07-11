@@ -149,11 +149,11 @@ class SessionProbeRunner(BaseRunner):
         # (injection, dalfox, ...) andrebbero avanti "alla cieca" contro
         # endpoint protetti e produrrebbero solo falsi negativi silenziosi.
         _err(f"AUTENTICAZIONE FALLITA ({reason}).")
-        _err("I moduli che richiedono login (sqlmap, ghauri, dalfox, directory_traversal, ...) "
-             "verrebbero eseguiti senza sessione valida: pipeline interrotta per evitare un report "
-             "pieno di falsi negativi.")
-        _err(f"Verifica le credenziali in settings.json → test_user "
-             f"(username attuale: {test_user.get('username')!r}) e rilancia.")
+        _err("I moduli dinamici auth-dipendenti (sqlmap, ghauri, dalfox, directory_traversal, ...) "
+             "verranno saltati per evitare falsi negativi silenziosi contro endpoint protetti; "
+             "i moduli statici (semgrep, secret scanning, ...) girano comunque.")
+        _err(f"Per abilitare anche i moduli dinamici verifica le credenziali in settings.json → "
+             f"test_user (username attuale: {test_user.get('username')!r}) e rilancia.")
         self._save_state(state, None, None, registered=already_registered, logged_in=False)
         return "blocked", f"auth hard-fail: {reason}"
 
