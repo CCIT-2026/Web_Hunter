@@ -13,7 +13,7 @@ Regole:
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,7 @@ def generate(service_name: str, report_dir: str) -> Path:
         f"# {service_name}",
         "",
         f"**Language:** {lang}  **Framework:** {fw}  "
-        f"**Path:** {report_dir}  **Generated:** {datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"**Path:** {report_dir}  **Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
     ]
 

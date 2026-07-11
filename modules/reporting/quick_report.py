@@ -14,7 +14,7 @@ Esclusi: unlikely_path, confidence != HIGH, secret trovati in file .env
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ _LABEL: dict[str, str] = {
 _CONTRACT_FILES = {
     "detected_stack.json", "endpoints_map.json", "auth_state.json",
     "stack_detector.json", "mapping.json", "session_probe.json",
+    "semgrep_raw.json",  # raw list output, not a module-report dict
 }
 
 _BAR_CHAR = "█"
@@ -97,7 +98,7 @@ def generate(service_name: str, report_dir: str) -> Path:
         f"# {service_name} — Quick Report",
         "",
         f"**Language:** {lang}  **Framework:** {fw}  "
-        f"**Generated:** {datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
     ]
 
@@ -166,6 +167,8 @@ def _collect_high_findings(json_dir: Path) -> dict[str, list[dict]]:
         try:
             data = json.loads(jf.read_text())
         except Exception:
+            continue
+        if not isinstance(data, dict):
             continue
         if data.get("status") in ("skipped", "error"):
             continue

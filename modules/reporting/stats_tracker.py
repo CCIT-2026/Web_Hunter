@@ -22,6 +22,7 @@ _CONTRACT_FILES = {
     "stack_detector.json",
     "mapping.json",
     "session_probe.json",
+    "semgrep_raw.json",  # raw list output, not a module-report dict
 }
 
 # Normalizzazione raw type → chiave canonica
@@ -87,6 +88,8 @@ def generate(report_dir: str) -> dict[str, int]:
         try:
             data = json.loads(jf.read_text())
         except Exception:
+            continue
+        if not isinstance(data, dict):
             continue
         if data.get("status") in ("skipped", "error"):
             continue
