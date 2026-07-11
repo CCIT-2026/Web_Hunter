@@ -257,6 +257,14 @@ def _clean(engine: str):
     ok("Clean completato.")
 
 
+def _image_exists(engine: str) -> bool:
+    r = subprocess.run(
+        [engine, "image", "inspect", _IMAGE_NAME],
+        capture_output=True,
+    )
+    return r.returncode == 0
+
+
 def _build_image(engine: str, no_cache: bool = False):
     dockerfile = _HERE / "Dockerfile"
     if not dockerfile.exists():
@@ -559,20 +567,43 @@ def _resolve_target_url(
             compose_candidates[i] = new_port
 
     # --- 4. Port-diff scan + compose up ---
+
+    # Pre-check: if a candidate is already accepting connections, skip compose up entirely.
+    # This covers: service already started manually in pre-commands, or a previous run left it up.
+    for port in compose_candidates:
+        if _is_port_busy(host, port):
+            url = f"http://{host}:{port}"
+            ok(f"Servizio già in ascolto su porta {port}  →  {url}")
+            _save_service_url(settings, service_path, url)
+            return url
+
     ports_before = _listening_ports()
 
     if compose_file:
         section("Avvio servizio target")
         step(f"{engine} compose up -d")
-        r = run_interactive([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
-        if r.returncode != 0:
-            err("Avvio compose fallito — continuo comunque con port scan.")
-        time.sleep(2)  # brief settle so ports have time to appear in ss
+        # Use a hard timeout so that compose providers that don't properly detach
+        # (e.g. podman-compose on rootless podman) don't block the tool indefinitely.
+        try:
+            r = subprocess.run(
+                [engine, "compose", "up", "-d"],
+                cwd=str(compose_file.parent),
+                timeout=30,
+            )
+            if r.returncode != 0:
+                err("Avvio compose fallito — continuo comunque con port scan.")
+        except subprocess.TimeoutExpired:
+            warn("compose up non ha risposto in 30s — continuo (i container potrebbero essere già up).")
+        step("Attendo stabilizzazione porte (2s)...")
+        time.sleep(2)
 
+    step("Scan porte in ascolto...")
     ports_after = _listening_ports()
     diff_ports = sorted((ports_after - ports_before) - _SYSTEM_PORTS - {0, 65535})
     if diff_ports:
         step(f"Nuove porte rilevate post-compose: {diff_ports}")
+    else:
+        step(f"Nessuna nuova porta nel diff — uso candidati da compose: {compose_candidates}")
 
     # Merge: compose-parsed candidates first (more reliable label), then diff-detected
     all_candidates = list(dict.fromkeys(compose_candidates + diff_ports))
@@ -793,6 +824,8 @@ def main():
     if args.rebuild:
         _clean(engine)
         _build_image(engine, no_cache=True)
+    elif _image_exists(engine):
+        ok(f"Immagine {_IMAGE_NAME} già presente — skip build.  (usa --rebuild per forzare)")
     else:
         _build_image(engine)
 
