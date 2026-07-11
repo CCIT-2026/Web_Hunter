@@ -63,6 +63,26 @@ _DEFAULT_SETTINGS = {
 }
 _IMAGE_NAME = "ctf-recon-suite:latest"
 
+# Ports almost certainly belonging to infrastructure, not the web frontend.
+# Used to filter compose port mappings and post-compose port-diff results.
+_SYSTEM_PORTS: set[int] = {
+    20, 21, 22, 23, 25, 53, 80, 110, 143, 389, 443, 445, 993, 995,
+    1433,          # MSSQL
+    3306,          # MySQL / MariaDB
+    5432,          # PostgreSQL
+    6379,          # Redis
+    9200, 9300,    # Elasticsearch
+    27017, 27018,  # MongoDB
+    5672, 15672,   # RabbitMQ AMQP + management UI
+    1883, 8883,    # MQTT
+    9092,          # Kafka
+    2181,          # Zookeeper
+    11211,         # Memcached
+    5601,          # Kibana
+    4369,          # Erlang EPMD
+    50051,         # gRPC default
+}
+
 
 # ---------------------------------------------------------------------------
 # Output — colored step messages always shown; tool output gated by flags
@@ -188,12 +208,34 @@ def _container_name(service_path: str) -> str:
     return f"ctf-recon-{slug}-{h}"
 
 
-def _clean(engine: str):
-    """Rimuove SOLO i container ctf-recon-* e l'immagine ctf-recon-suite:latest.
+# ---------------------------------------------------------------------------
+# Per-service URL cache
+#
+# target_url is stored per-service (keyed by MD5 of resolved path) inside
+# settings["services"], so switching between services never reuses a stale URL.
+# The top-level settings["target_url"] is kept for backwards compatibility.
+# ---------------------------------------------------------------------------
 
-    NON esegue image prune né system prune: troppo aggressivi su sistemi condivisi
-    (distrobox, altri progetti). Se vuoi liberare layer intermedi fallo manualmente.
-    """
+def _service_key(service_path: str) -> str:
+    return hashlib.md5(str(Path(service_path).resolve()).encode()).hexdigest()[:12]
+
+
+def _get_service_url(settings: dict, service_path: str) -> "str | None":
+    return settings.get("services", {}).get(_service_key(service_path), {}).get("target_url")
+
+
+def _save_service_url(settings: dict, service_path: str, url: str) -> None:
+    key = _service_key(service_path)
+    settings.setdefault("services", {})[key] = {
+        "target_url": url,
+        "name": Path(service_path).name,
+    }
+    settings["target_url"] = url  # backwards compat for container env var
+    _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
+
+
+def _clean(engine: str):
+    """Rimuove SOLO i container ctf-recon-* e l'immagine ctf-recon-suite:latest."""
     step("Pulizia container e immagine recon...")
     dbg(engine=engine, image=_IMAGE_NAME)
 
@@ -225,13 +267,12 @@ def _build_image(engine: str, no_cache: bool = False):
         cmd.insert(2, "--no-cache")
 
     dbg(dockerfile=str(dockerfile), no_cache=no_cache, image=_IMAGE_NAME)
-    step(f"Build immagine {_IMAGE_NAME}{'  (--no-cache)' if no_cache else ''}...")
+    step(f"Build immagine {_IMAGE_NAME}{'  (--no-cache)' if no_cache else ''}  (può richiedere alcuni minuti)...")
 
-    r = run_cmd(cmd)
+    # Always stream build output — never suppress: failures must be visible.
+    r = subprocess.run(cmd)
     if r.returncode != 0:
         err("Build immagine fallita.")
-        if not _verbose:
-            warn("Riavvia con --verbose per i dettagli del build.")
         sys.exit(1)
     ok("Immagine costruita.")
 
@@ -294,7 +335,7 @@ def _run_analysis(
 
 
 # ---------------------------------------------------------------------------
-# Target service launcher
+# Target service — port detection utilities
 # ---------------------------------------------------------------------------
 
 _BURP_RESERVED = {8080}
@@ -326,17 +367,71 @@ def _detect_compose_file(service_path: str) -> "Path | None":
     return None
 
 
-def _detect_service_port(service_path: str, compose_file: "Path | None") -> "int | None":
+def _parse_web_ports(compose_file: "Path | None") -> list[int]:
+    """
+    Extract candidate web-frontend ports from a compose file (or Dockerfiles),
+    filtering out known infrastructure/DB ports from _SYSTEM_PORTS.
+
+    Returns an ordered list — earlier entries are more likely to be the frontend.
+    """
+    candidates: list[int] = []
+    seen: set[int] = set()
+
+    def _add(port: int) -> None:
+        if port not in seen and port not in _SYSTEM_PORTS and 1024 <= port <= 65534:
+            seen.add(port)
+            candidates.append(port)
+
     if compose_file:
         text = compose_file.read_text(errors="replace")
-        m = re.search(r'(?:^|\s)["\']?(?:\d{1,3}(?:\.\d{1,3}){3}:)?(\d{2,5}):\d{2,5}', text, re.M)
-        if m:
-            return int(m.group(1))
-    for df in Path(service_path).rglob("Dockerfile*"):
-        m = re.search(r"^EXPOSE\s+(\d+)", df.read_text(errors="replace"), re.M)
-        if m:
-            return int(m.group(1))
-    return None
+        # Match all host-side port mappings: "HOST:CONTAINER" or "IP:HOST:CONTAINER"
+        for m in re.finditer(
+            r'["\']?(?:\d{1,3}(?:\.\d{1,3}){3}:)?(\d{2,5}):\d{2,5}',
+            text,
+        ):
+            try:
+                _add(int(m.group(1)))
+            except ValueError:
+                pass
+
+    # Fallback: EXPOSE directives in any Dockerfile under the same root
+    if not candidates and compose_file:
+        for df in compose_file.parent.rglob("Dockerfile*"):
+            for m in re.finditer(r"^EXPOSE\s+(\d+)", df.read_text(errors="replace"), re.M):
+                try:
+                    _add(int(m.group(1)))
+                except ValueError:
+                    pass
+
+    return candidates
+
+
+def _listening_ports() -> set[int]:
+    """Return the set of TCP ports currently in LISTEN state (uses `ss`)."""
+    try:
+        r = subprocess.run(
+            ["ss", "-tlnH"], capture_output=True, text=True, timeout=3
+        )
+        ports: set[int] = set()
+        for line in r.stdout.splitlines():
+            # ss -tlnH columns: State Recv-Q Send-Q Local-Addr:Port Peer-Addr:Port
+            for part in line.split():
+                if ":" in part:
+                    port_str = part.rsplit(":", 1)[1]
+                    if port_str.isdigit():
+                        ports.add(int(port_str))
+        return ports
+    except Exception:
+        return set()
+
+
+def _startup_timeout(compose_file: "Path | None") -> int:
+    """Estimate startup timeout based on heavy dependencies declared in compose."""
+    if compose_file is None:
+        return 20
+    text = compose_file.read_text(errors="replace").lower()
+    heavy = ("postgres", "mysql", "mariadb", "mongodb", "redis", "kafka", "elasticsearch")
+    return 45 if any(kw in text for kw in heavy) else 20
 
 
 def _replace_port_in_service(
@@ -354,13 +449,11 @@ def _replace_port_in_service(
     def _sub(text: str, f: Path) -> str:
         t = text
         if f.suffix in {".yml", ".yaml"} or "Dockerfile" in f.name:
-            # "OLD_HOST:OLD_PORT:N" o bare "OLD_PORT:N" → "NEW_HOST:NEW_PORT:N"
             t = re.sub(
                 rf'(["\']?)(?:{re.escape(old_host)}:)?{old_port}:(\d+)',
                 rf'\g<1>{new_host}:{new_port}:\g<2>',
                 t,
             )
-        # client/config: localhost:PORT e old_host:PORT
         for alias in (old_host, "localhost"):
             t = t.replace(f"{alias}:{old_port}", f"{new_host}:{new_port}")
         return t
@@ -396,7 +489,7 @@ def _is_privileged_port(port: int, engine: str) -> bool:
 
 
 def _wait_for_service(url: str, timeout: int = 20) -> bool:
-    print(f"{_C.CYAN}{_C.BOLD}→{_C.RESET}  Attendo {url}", end="", flush=True)
+    print(f"{_C.CYAN}{_C.BOLD}→{_C.RESET}  Attendo HTTP su {url}", end="", flush=True)
     for _ in range(timeout):
         try:
             urllib.request.urlopen(url, timeout=1)
@@ -409,104 +502,135 @@ def _wait_for_service(url: str, timeout: int = 20) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# _resolve_target_url — cascade port detection (service-agnostic)
+# ---------------------------------------------------------------------------
+
+def _resolve_target_url(
+    engine: str,
+    service_path: str,
+    compose_file: "Path | None",
+    settings: dict,
+) -> str:
+    """
+    Determine the target URL for this specific service using a 6-step cascade:
+
+    1. Per-service URL cache (keyed by path hash) — instant if already known
+    2. Parse compose/Dockerfile → filter _SYSTEM_PORTS → candidate list
+    3. Privileged port remapping for podman rootless (before compose up)
+    4. compose up -d  +  port-diff scan (ss snapshot before vs after)
+    5. Wait for first candidate to accept TCP (dynamic timeout for DB deps)
+    6. Ask user with detected suggestions
+
+    The detected URL is saved to the per-service cache so future runs are instant.
+    """
+    host = "127.0.0.1"
+
+    # --- 1. Per-service URL cache ---
+    cached = _get_service_url(settings, service_path)
+    if cached:
+        try:
+            _h, _p = cached.rstrip("/").rsplit(":", 1)
+            _h = _h.replace("http://", "").replace("https://", "")
+            if _is_port_busy(_h, int(_p)):
+                ok(f"URL in cache: {cached}")
+                return cached
+        except Exception:
+            pass
+        warn(f"Cache ({cached}) non raggiungibile — rilevo porta...")
+
+    # --- 2. Parse candidate web ports from compose ---
+    compose_candidates = _parse_web_ports(compose_file)
+    if compose_candidates:
+        step(f"Porte candidate dal compose (filtrate system ports): {compose_candidates}")
+    else:
+        step("Nessuna porta web trovata nel compose — uso solo port-diff scan")
+
+    # --- 3. Privileged port remapping (podman rootless, before compose up) ---
+    for i, port in enumerate(compose_candidates):
+        if _is_privileged_port(port, engine):
+            excl = _BURP_RESERVED | set(compose_candidates)
+            free = _find_free_ports(exclude=excl)
+            new_port = free[0] if free else port + 8000
+            warn(f"Porta {port} privilegiata (podman rootless) — rimappo a {new_port}")
+            changed = _replace_port_in_service(service_path, host, port, host, new_port)
+            if changed:
+                ok(f"File aggiornati: {', '.join(changed)}")
+            compose_candidates[i] = new_port
+
+    # --- 4. Port-diff scan + compose up ---
+    ports_before = _listening_ports()
+
+    if compose_file:
+        section("Avvio servizio target")
+        step(f"{engine} compose up -d")
+        r = run_interactive([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
+        if r.returncode != 0:
+            err("Avvio compose fallito — continuo comunque con port scan.")
+        time.sleep(2)  # brief settle so ports have time to appear in ss
+
+    ports_after = _listening_ports()
+    diff_ports = sorted((ports_after - ports_before) - _SYSTEM_PORTS - {0, 65535})
+    if diff_ports:
+        step(f"Nuove porte rilevate post-compose: {diff_ports}")
+
+    # Merge: compose-parsed candidates first (more reliable label), then diff-detected
+    all_candidates = list(dict.fromkeys(compose_candidates + diff_ports))
+
+    # --- 5. Wait for first reachable candidate (dynamic timeout) ---
+    # Quick pass: maybe it's already up
+    for port in all_candidates:
+        if _is_port_busy(host, port):
+            url = f"http://{host}:{port}"
+            ok(f"Porta attiva: {port}  →  {url}")
+            _save_service_url(settings, service_path, url)
+            return url
+
+    timeout = _startup_timeout(compose_file)
+    if all_candidates:
+        step(f"Attendo avvio (max {timeout}s)  candidati: {all_candidates}")
+        for _ in range(timeout):
+            for port in all_candidates:
+                if _is_port_busy(host, port):
+                    url = f"http://{host}:{port}"
+                    ok(f"Porta attiva: {port}  →  {url}")
+                    _save_service_url(settings, service_path, url)
+                    return url
+            print(".", end="", flush=True)
+            time.sleep(1)
+        print()
+        warn(f"Nessun candidato ha risposto in {timeout}s.")
+
+    # --- 6. Ask user ---
+    suggestion = str(all_candidates[0]) if all_candidates else "5000"
+    hint = f"  (rilevate: {', '.join(map(str, all_candidates))})" if all_candidates else ""
+    warn(f"Porta non rilevata automaticamente.{hint}")
+    try:
+        port = int(_ask("Inserisci porta manualmente", suggestion))
+    except ValueError:
+        port = int(suggestion)
+    url = f"http://{host}:{port}"
+    _save_service_url(settings, service_path, url)
+    return url
+
+
+# ---------------------------------------------------------------------------
+# Pre-launch commands
+# ---------------------------------------------------------------------------
+
 def _run_precommands(service_path: str) -> None:
     """Chiede comandi da eseguire prima dell'avvio del servizio."""
     section("Comandi pre-avvio")
     step("$ ls -la")
     run_interactive("ls -la --color=always", shell=True, cwd=service_path)
-    print(f"  {_C.DIM}Inserisci comandi (lascia vuoto o digita 'n'/'no' per terminare){_C.RESET}")
+    print(f"  {_C.DIM}Inserisci comandi da eseguire ora (vuoto o 'n' per terminare){_C.RESET}")
+    print(f"  {_C.DIM}Nota: il compose up verrà avviato automaticamente dopo.{_C.RESET}")
     while True:
         cmd = _ask("Comando").strip()
         if not cmd or cmd.lower() in ("n", "no"):
             break
         step(f"$ {cmd}")
         run_interactive(cmd, shell=True, cwd=service_path)
-
-
-def _start_target_service(engine: str, service_path: str, settings: dict) -> "str | None":
-    """Avvia interattivamente il servizio target. Ritorna target_url o None se saltato."""
-    compose_file = _detect_compose_file(service_path)
-
-    section("Servizio target")
-    if compose_file:
-        ok(f"Trovato: {compose_file.relative_to(Path(service_path))}")
-    else:
-        warn("Nessun docker-compose trovato")
-    print()
-    _show_tree(service_path)
-
-    dbg(compose_file=str(compose_file) if compose_file else None, service_path=service_path)
-
-    if compose_file:
-        _run_precommands(service_path)
-        section("Avvio servizio")
-        ans = _ask(f"Avvio con `{engine} compose up -d`?  [s/n/skip]", "s").lower()
-        if ans == "skip":
-            return None
-        if ans not in ("s", "si", "sì", "y", "yes"):
-            warn("Avvio saltato — assicurati che il servizio sia già in ascolto.")
-            return None
-    else:
-        _run_precommands(service_path)
-
-    # Rileva host:port
-    host, port = "127.0.0.1", _detect_service_port(service_path, compose_file)
-    if port is None:
-        try:
-            port = int(_ask("Porta non rilevata automaticamente. Inseriscila", "5000"))
-        except ValueError:
-            port = 5000
-
-    dbg(host=host, detected_port=port)
-
-    # Gestione porta privilegiata (podman rootless non può bindare < 1024)
-    if _is_privileged_port(port, engine):
-        free = _find_free_ports(exclude=_BURP_RESERVED | {port})
-        new_port = free[0] if free else port + 8000
-        warn(f"Porta {port} privilegiata con podman rootless — rimappo a {new_port}")
-        changed = _replace_port_in_service(service_path, host, port, host, new_port)
-        if changed:
-            ok(f"File aggiornati: {', '.join(changed)}")
-        port = new_port
-
-    # Gestione conflitto porta (porta già in uso)
-    elif _is_port_busy(host, port):
-        warn(f"Porta {port} occupata su {host}.")
-        alt_host = "127.0.0.2"
-        if not _is_port_busy(alt_host, port):
-            step(f"Cambio interfaccia → {alt_host}:{port}")
-            changed = _replace_port_in_service(service_path, host, port, alt_host, port)
-            if changed:
-                ok(f"Aggiornati: {', '.join(changed)}")
-            host = alt_host
-        else:
-            free = _find_free_ports(exclude=_BURP_RESERVED | {port})
-            step(f"Porte libere: {', '.join(map(str, free))}")
-            try:
-                new_port = int(_ask("Quale porta usare?", str(free[0]) if free else "5001"))
-            except ValueError:
-                new_port = free[0] if free else 5001
-            changed = _replace_port_in_service(service_path, host, port, host, new_port)
-            if changed:
-                ok(f"Aggiornati: {', '.join(changed)}")
-            port = new_port
-
-    # Avvia (solo se c'è compose; altrimenti l'utente lo ha già avviato coi pre-comandi)
-    if compose_file:
-        step(f"{engine} compose up -d")
-        r = run_interactive([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
-        if r.returncode != 0:
-            err("Avvio servizio fallito — vedi output sopra.")
-            return None
-
-    target_url = f"http://{host}:{port}"
-    _wait_for_service(target_url)
-
-    # Salva in settings.json
-    settings["target_url"] = target_url
-    _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
-    ok(f"target_url → {target_url}")
-    return target_url
 
 
 # ---------------------------------------------------------------------------
@@ -647,7 +771,6 @@ def main():
         service_path=service_path,
         service_name=service_name,
         report_dir=report_dir,
-        target_url=settings.get("target_url") or "(non impostato)",
         module=args.module or "(tutti)",
         dev=args.dev,
         rebuild=args.rebuild,
@@ -656,55 +779,16 @@ def main():
 
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
-    # Avvio del servizio target
+    # --- Target service startup ---
     if not args.no_target:
-        target_url = settings.get("target_url")
-        if target_url:
-            step(f"target_url da settings: {target_url}")
-            # Verifica che il servizio sia effettivamente raggiungibile
-            try:
-                host, port_str = target_url.rstrip("/").rsplit(":", 1)
-                reachable = _is_port_busy(host.replace("http://", "").replace("https://", ""), int(port_str))
-            except Exception:
-                reachable = False
-            if not reachable:
-                warn(f"Servizio non raggiungibile su {target_url}")
-                compose_file = _detect_compose_file(service_path)
-                _run_precommands(service_path)
-                if compose_file:
-                    # Estrai host e porta dalla target_url salvata
-                    try:
-                        from urllib.parse import urlparse
-                        _p = urlparse(target_url)
-                        svc_host = _p.hostname or "127.0.0.1"
-                        svc_port = _p.port or 80
-                    except Exception:
-                        svc_host, svc_port = "127.0.0.1", 80
+        _show_tree(service_path)
+        _run_precommands(service_path)
+        compose_file = _detect_compose_file(service_path)
+        target_url = _resolve_target_url(engine, service_path, compose_file, settings)
+        # HTTP-level readiness check (TCP already passed inside _resolve_target_url)
+        _wait_for_service(target_url, timeout=_startup_timeout(compose_file))
 
-                    # Rimappa porta privilegiata se necessario
-                    if _is_privileged_port(svc_port, engine):
-                        free = _find_free_ports(exclude=_BURP_RESERVED | {svc_port})
-                        new_port = free[0] if free else svc_port + 8000
-                        warn(f"Porta {svc_port} privilegiata con podman rootless — rimappo a {new_port}")
-                        changed = _replace_port_in_service(service_path, svc_host, svc_port, svc_host, new_port)
-                        if changed:
-                            ok(f"File aggiornati: {', '.join(changed)}")
-                        svc_port = new_port
-                        target_url = f"http://{svc_host}:{svc_port}"
-                        settings["target_url"] = target_url
-                        _SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
-                        ok(f"target_url aggiornato → {target_url}")
-
-                    r = run_interactive([engine, "compose", "up", "-d"], cwd=str(compose_file.parent))
-                    if r.returncode != 0:
-                        err("Avvio servizio fallito — vedi output sopra.")
-                    else:
-                        _wait_for_service(target_url)
-                else:
-                    warn("Nessun docker-compose trovato — avvia il servizio manualmente.")
-        else:
-            _start_target_service(engine, service_path, settings)
-
+    # --- Build & run analysis ---
     section("Build immagine")
     if args.rebuild:
         _clean(engine)
