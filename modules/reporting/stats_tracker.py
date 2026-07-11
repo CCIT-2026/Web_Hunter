@@ -100,6 +100,6 @@ def generate(report_dir: str) -> dict[str, int]:
             counts[_canonical(f.get("type", ""))] += 1
 
     ordered = dict(sorted(counts.items(), key=lambda x: (-x[1], x[0])))
-    (report_dir / "stats.json").write_text(json.dumps(ordered, indent=2))
+    (report_dir / "json_reports" / "stats.json").write_text(json.dumps(ordered, indent=2))
     logger.info("stats.json scritto (%d tipi)", len(ordered))
     return ordered

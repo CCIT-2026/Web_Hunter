@@ -66,8 +66,7 @@ class SemgrepRunner(BaseRunner):
         except json.JSONDecodeError:
             return "error", f"cannot parse semgrep JSON: {stdout[:200]}"
 
-        # dump raw per debug — inspect reports/<service>/semgrep_raw.json
-        raw_out = self.report_dir / "semgrep_raw.json"
+        raw_out = self.report_dir / "json_reports" / "semgrep_raw.json"
         raw_out.write_text(json.dumps(data.get("results", [])[:5], indent=2))
 
         for result in data.get("results", []):

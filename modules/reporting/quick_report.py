@@ -81,7 +81,7 @@ def generate(service_name: str, report_dir: str) -> Path:
     out        = report_dir / "quick_report.md"
 
     stack            = _load_json(json_dir / "detected_stack.json") or {}
-    stats            = _load_json(report_dir / "stats.json") or {}
+    stats            = _load_json(report_dir / "json_reports" / "stats.json") or {}
     findings_by_type = _collect_high_findings(json_dir)
 
     lines: list[str] = []

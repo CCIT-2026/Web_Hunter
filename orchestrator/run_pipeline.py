@@ -84,7 +84,7 @@ def main():
         _col.warn(f"Moduli in errore: {', '.join(errors)}")
     _col.ok(f"Report esteso  →  {args.report_dir}/extended_report.md")
     _col.ok(f"Quick report   →  {args.report_dir}/quick_report.md")
-    _col.ok(f"Stats          →  {args.report_dir}/stats.json")
+    _col.ok(f"Stats          →  {args.report_dir}/json_reports/stats.json")
 
 
 if __name__ == "__main__":

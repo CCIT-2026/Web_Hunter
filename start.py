@@ -190,18 +190,10 @@ def _container_name(service_path: str) -> str:
 
 
 def _clean(engine: str):
-    """Rimuove SOLO i container e l'immagine di Web Hunter, poi pruning limitato.
+    """Rimuove SOLO i container ctf-recon-* e l'immagine ctf-recon-suite:latest.
 
-    Cosa tocca:
-      - Container il cui nome inizia con ctf-recon-  (tutti i servizi analizzati)
-      - Immagine ctf-recon-suite:latest
-      - Layer intermedi dangling (untagged) rimasti dai build → image prune -f
-        Questi sono strati senza tag lasciati da rebuild precedenti; non toccano
-        immagini con tag, volumi o container di altri progetti.
-
-    Cosa NON tocca:
-      - Qualsiasi altro container, immagine o volume sul sistema.
-      - 'system prune' e '--volumes' sono intenzionalmente assenti.
+    NON esegue image prune né system prune: troppo aggressivi su sistemi condivisi
+    (distrobox, altri progetti). Se vuoi liberare layer intermedi fallo manualmente.
     """
     step("Pulizia container e immagine recon...")
     dbg(engine=engine, image=_IMAGE_NAME)
@@ -221,8 +213,6 @@ def _clean(engine: str):
     else:
         warn(f"Immagine {_IMAGE_NAME} non trovata o già rimossa.")
 
-    step("Pruning layer dangling (untagged)...")
-    run_cmd([engine, "image", "prune", "-f"])
     ok("Clean completato.")
 
 
@@ -738,11 +728,13 @@ def main():
     section("Completato")
     ok(f"Quick report   →  {report_dir}/quick_report.md")
     ok(f"Report esteso  →  {report_dir}/extended_report.md")
-    ok(f"JSON           →  {report_dir}/json_reports/")
+    ok(f"JSON  →  {report_dir}/json_reports/  (include stats.json e semgrep_raw.json)")
 
 
 if __name__ == "__main__":
-    with open('assets/.logo/ascii_art.txt') as logo:
-        print(logo.read())
+    try:
+        print((_HERE / "assets" / ".logo" / "ascii_art.txt").read_text())
+    except OSError:
+        pass
 
     main()
