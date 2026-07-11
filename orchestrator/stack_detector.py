@@ -63,7 +63,7 @@ class _RE:
 
     # --- NoSQL ---
     NOSQL_FIND  = re.compile(r"""\.find\s*\(|\.findOne\s*\(|\.aggregate\s*\(|db\[|collection\[|r\.table\(""")
-    NOSQL_REDIS = re.compile(r"""redis\.(?:get|set|hget|hset|lpush|rpush|zadd)|\.get\(|\.set\(""")
+    NOSQL_REDIS = re.compile(r"""redis\.(?:get|set|hget|hset|lpush|rpush|zadd)""")
     NOSQL_MONGO = re.compile(r"""pymongo|MongoClient|mongoose|mongodb""", re.I)
 
     # --- JWT ---
@@ -75,7 +75,7 @@ class _RE:
     # --- eval / pickle on input ---
     EVAL_EXEC   = re.compile(r"""\beval\s*\(|\bexec\s*\(""")
     PICKLE      = re.compile(r"""pickle\.loads?\s*\(|cPickle\.loads?\s*\(""")
-    YAML_LOAD   = re.compile(r"""yaml\.load\s*\((?!\s*[^,)]+Loader\s*=\s*yaml\.(?:Safe|Base|Full)Loader)""")
+    YAML_LOAD   = re.compile(r"""yaml\.load\s*\((?!\s*[^)]+Loader\s*=\s*yaml\.(?:Safe|Base|Full)Loader)""")
 
     # --- file upload ---
     UPLOAD_PY   = re.compile(r"""request\.files|save\s*\(|secure_filename|werkzeug\.utils""", re.I)
