@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 _CONF_MAP = {"high": "high", "error": "high", "warning": "medium", "info": "low"}
 
+# Pure infrastructure/container findings — not directly exploitable web vulns in CTF.
+# Downgraded to low so they don't pollute the HIGH section of quick_report.
+_INFRA_PATTERN = re.compile(
+    r"dockerfile|docker.compose|missing.user|container\.security|missing-user", re.I
+)
+
 
 def _line_from_offset(path: "Path", offset: int) -> int | None:
     """Ricava il numero di riga (1-based) da un byte offset nel file.
@@ -36,11 +42,36 @@ def _line_from_offset(path: "Path", offset: int) -> int | None:
         return None
     return text[:offset].count("\n") + 1
 
-# Tipi di finding semgrep → tipo interno (best-effort, poi l'analista verifica)
+# Maps a keyword extracted from the semgrep check_id to a canonical vuln type.
 _RULE_TO_TYPE = re.compile(
-    r"(sql|nosql|xss|ssti|xxe|ssrf|traversal|ldap|command|injection|jwt|secret|hardcoded|eval|pickle)",
+    r"(sql|nosql|xss|ssti|xxe|ssrf|traversal|ldap|command|inject|jwt|secret|hardcoded|eval|pickle|"
+    r"prototype|redirect|deseri|rce|misconfig|debug)",
     re.I,
 )
+
+_KEYWORD_TO_TYPE: dict[str, str] = {
+    "sql":        "sqli",
+    "nosql":      "nosql",
+    "xss":        "xss",
+    "ssti":       "ssti",
+    "xxe":        "xxe",
+    "ssrf":       "ssrf",
+    "traversal":  "path_traversal",
+    "ldap":       "ldap",
+    "command":    "cmdi",
+    "inject":     "cmdi",
+    "jwt":        "jwt",
+    "secret":     "secret",
+    "hardcoded":  "secret",
+    "eval":       "cmdi",
+    "pickle":     "cmdi",
+    "prototype":  "other",
+    "redirect":   "open_redirect",
+    "deseri":     "other",
+    "rce":        "cmdi",
+    "misconfig":  "misconfig",
+    "debug":      "misconfig",
+}
 
 
 class SemgrepRunner(BaseRunner):
@@ -79,9 +110,13 @@ class SemgrepRunner(BaseRunner):
             line_no = _line_from_offset(self.service_root / rel_path, offset) if offset is not None else start.get("line")
             message = extra.get("message", check_id)
 
-            # Match check_id against known type keywords
+            # Derive canonical type from check_id keywords; fallback to "other"
             m = _RULE_TO_TYPE.search(check_id)
-            type_ = m.group(1).lower() if m else "semgrep"
+            type_ = _KEYWORD_TO_TYPE.get(m.group(1).lower(), "other") if m else "other"
+
+            # Downgrade pure infra/container findings — not directly web-exploitable in CTF
+            if _INFRA_PATTERN.search(check_id) or _INFRA_PATTERN.search(rel_path):
+                severity = "low"
 
             # Find endpoint associated with this file (best-effort)
             ep = next((e for e in self.endpoints if e["file"] == rel_path), None)

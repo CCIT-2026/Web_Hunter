@@ -35,20 +35,21 @@ def _load_logo() -> str:
 
 _LOGO = _load_logo()
 
+# (flag_key, display_label, locations_key_in_detected_stack)
 _STACK_FLAGS = [
-    ("has_php",                       "PHP"),
-    ("has_symfony_twig",              "Symfony/Twig"),
-    ("has_grpc",                      "gRPC"),
-    ("has_file_upload",               "File upload"),
-    ("has_sql_queries",               "Query SQL"),
-    ("has_nosql",                     "NoSQL"),
-    ("uses_jwt",                      "JWT"),
-    ("has_eval_on_input",             "eval/pickle su input"),
-    ("has_outbound_request_on_input", "SSRF"),
-    ("has_graphql_endpoint",          "GraphQL"),
-    ("has_xpath_parser",              "XPath"),
-    ("has_file_path_from_input",      "Path Traversal"),
-    ("has_ldap_query",                "LDAP"),
+    ("has_php",                       "PHP",                  None),
+    ("has_symfony_twig",              "Symfony/Twig",         None),
+    ("has_grpc",                      "gRPC",                 None),
+    ("has_file_upload",               "File upload",          "file_upload_locations"),
+    ("has_sql_queries",               "Query SQL",            "sql_query_locations"),
+    ("has_nosql",                     "NoSQL",                "nosql_locations"),
+    ("uses_jwt",                      "JWT",                  "jwt_verification_locations"),
+    ("has_eval_on_input",             "eval/pickle su input", "eval_locations"),
+    ("has_outbound_request_on_input", "SSRF",                 "ssrf_locations"),
+    ("has_graphql_endpoint",          "GraphQL",              "graphql_locations"),
+    ("has_xpath_parser",              "XPath",                "xpath_locations"),
+    ("has_file_path_from_input",      "Path Traversal",       "path_traversal_locations"),
+    ("has_ldap_query",                "LDAP",                 "ldap_locations"),
 ]
 
 _LABEL: dict[str, str] = {
@@ -82,8 +83,9 @@ def generate(service_name: str, report_dir: str) -> Path:
     out        = report_dir / "quick_report.md"
 
     stack            = _load_json(json_dir / "detected_stack.json") or {}
-    stats            = _load_json(report_dir / "json_reports" / "stats.json") or {}
     findings_by_type = _collect_high_findings(json_dir)
+    # Derive counts from the same source as the detail section — always in sync.
+    high_stats = {k: len(v) for k, v in findings_by_type.items() if v}
 
     lines: list[str] = []
 
@@ -104,14 +106,26 @@ def generate(service_name: str, report_dir: str) -> Path:
 
     # ── Stack table ──────────────────────────────────────────────────────────
     lines += ["## Stack", ""]
-    lines += ["| Caratteristica | Rilevato |", "|---|---|"]
-    for flag, label in _STACK_FLAGS:
+    lines += ["| Caratteristica | | Evidenza (file:riga) |", "|---|---|---|"]
+    for flag, label, locs_key in _STACK_FLAGS:
         val = stack.get(flag, False)
-        lines.append(f"| {label} | {'✅' if val else '❌'} |")
+        if not val:
+            lines.append(f"| {label} | ❌ | |")
+            continue
+        locs = stack.get(locs_key, [])[:3] if locs_key else []
+        if locs:
+            parts = []
+            for loc in locs:
+                ref = f"`{loc['file']}:{loc['line']}`"
+                if loc.get("looks_weak") and loc.get("weak_reason"):
+                    ref += f" *(weak: {loc['weak_reason']})*"
+                parts.append(ref)
+            lines.append(f"| {label} | ✅ | {', '.join(parts)} |")
+        else:
+            lines.append(f"| {label} | ✅ | |")
     lines.append("")
 
     # ── Barchart HIGH findings ────────────────────────────────────────────────
-    high_stats = {k: v for k, v in stats.items() if v > 0}
     if not high_stats:
         lines += ["## Vulnerabilità HIGH", "", "> Nessun finding HIGH rilevato.", ""]
     else:
