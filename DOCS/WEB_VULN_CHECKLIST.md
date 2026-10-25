@@ -2,7 +2,7 @@
 
 > **Scopo.** Elenco esaustivo delle vulnerabilità web da coprire, incrociando gli **stack reali dei servizi di gara** (`SERVIZI/`) con le **classi già affrontate** nell'oracolo `WEB.md` e nei writeup del vault.
 >
-> **Come usarlo.** Giralo a una chat Claude che conosce il tuo tool: per ogni riga chiedi se è **coperta** (rilevamento e/o exploiting), compilando la colonna `Coperto dal tool?` con ✅ / ⚠️ (parziale) / ❌ e il nome del componente/modulo che la gestisce. Alla fine avrai la mappa dei buchi.
+> **Come usarlo.** Usalo con chi conosce il tuo tool: per ogni riga chiedi se è **coperta** (rilevamento e/o exploiting), compilando la colonna `Coperto dal tool?` con ✅ / ⚠️ (parziale) / ❌ e il nome del componente/modulo che la gestisce. Alla fine avrai la mappa dei buchi.
 >
 > Legenda colonna *Dove*: `Flask` = Flask+Jinja2 (MySQL/PG/SQLAlchemy) · `Node` = Express (pg/sequelize/ejs/multer/tar/sharp/jsonwebtoken) · `Svelte` = SvelteKit+MySQL+libxmljs · `PHP` = PHP+Twig · `gRPC` = gRPC/pycryptodome · `*` = trasversale a tutti.
 
